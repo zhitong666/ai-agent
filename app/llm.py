@@ -14,18 +14,49 @@ client = OpenAI(
 )
 
 SYSTEM_PROMPT = """你是招聘信息解析器。
-从用户提供的 JD 中提取结构化字段。
+从用户提供的 JD 中提取结构化岗位信息。
+必须调用 save_job_description 工具。"""
 
-必须返回一个 JSON 对象，字段如下：
-- company：公司名
-- title：岗位名称
-- seniority：只能是 junior、mid、senior、staff、unknown
-- responsibilities：职责列表
-- requirements：任职要求列表
-- keywords：技术关键词列表
-- domain：业务领域，没有则为空字符串
-
-不要输出 Markdown 代码块，不要输出任何解释。"""
+SAVE_JOB_DESCRIPTION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "save_job_description",
+        "description": "保存解析后的岗位信息",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "company": {"type": "string"},
+                "title": {"type": "string"},
+                "seniority": {
+                    "type": "string",
+                    "enum": ["junior", "mid", "senior", "staff", "unknown"],
+                },
+                "responsibilities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "requirements": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "keywords": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "domain": {"type": "string"},
+            },
+            "required": [
+                "company",
+                "title",
+                "seniority",
+                "responsibilities",
+                "requirements",
+                "keywords",
+            ],
+        },
+    },
+}
 
 def parse_job_description(jd_text: str) -> JobDescription:
     response = client.chat.completions.create(
@@ -34,10 +65,18 @@ def parse_job_description(jd_text: str) -> JobDescription:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": jd_text},
         ],
-        response_format={"type": "json_object"},
-        temperature=0.1,
+        tools=[SAVE_JOB_DESCRIPTION_TOOL],
+        tool_choice={
+            "type": "function",
+            "function": {"name": "save_job_description"},
+        },
     )
 
-    content = response.choices[0].message.content
-    data = json.loads(content)
-    return JobDescription.model_validate(data)
+    message = response.choices[0].message
+
+    if not message.tool_calls:
+        raise RuntimeError("模型没有返回 tool_calls")
+
+    tool_call = message.tool_calls[0]
+    arguments = json.loads(tool_call.function.arguments)
+    return JobDescription.model_validate(arguments)
