@@ -9,9 +9,11 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
+    "numpy>=2.5.2",
     "openai>=3.1.0",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
+    "sentence-transformers>=6.0.0",
     "uvicorn[standard]>=0.52.3",
 ]
 
@@ -27,6 +29,10 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
 ]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

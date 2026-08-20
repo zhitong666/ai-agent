@@ -1,0 +1,27 @@
+[
+  {
+    "id": "doc-python",
+    "title": "Python 基础",
+    "text": "Python 是 AI Agent 开发中最常用的后端语言，需要掌握函数、类型标注、FastAPI 和 Pydantic。"
+  },
+  {
+    "id": "doc-llm",
+    "title": "LLM 应用开发",
+    "text": "LLM 应用开发需要理解 Prompt、结构化输出、function calling 和工具调用。"
+  },
+  {
+    "id": "doc-rag",
+    "title": "RAG",
+    "text": "RAG 通过 Embedding 和向量检索从知识库中找到与问题相关的资料，再交给大模型生成答案。"
+  },
+  {
+    "id": "doc-agent",
+    "title": "AI Agent",
+    "text": "AI Agent 需要任务规划、工具调用、记忆管理和多步执行能力。"
+  },
+  {
+    "id": "doc-deploy",
+    "title": "部署",
+    "text": "Agent 服务通常需要 Docker、环境变量管理、日志、监控和接口测试。"
+  }
+]
