@@ -4,6 +4,9 @@ from pydantic import BaseModel, Field
 from app.llm import parse_job_description
 from app.models import JobDescription
 
+from app.agent import analyze_job
+from app.models import JobAnalysis
+
 app = FastAPI(title="AI Job Agent", version="0.1.0")
 
 class ParseRequest(BaseModel):
@@ -19,3 +22,14 @@ def parse_jd(request: ParseRequest) -> JobDescription:
         raise HTTPException(status_code=422, detail="text must not be empty")
 
     return parse_job_description(request.text)
+
+
+class AnalyzeRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+@app.post("/jd/analyze", response_model=JobAnalysis)
+def analyze_jd(request: AnalyzeRequest) -> JobAnalysis:
+    if not request.text.strip():
+        raise HTTPException(status_code=422, detail="text must not be empty")
+    
+    return analyze_job(request.text)
