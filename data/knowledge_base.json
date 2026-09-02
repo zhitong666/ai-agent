@@ -23,5 +23,10 @@
     "id": "doc-deploy",
     "title": "部署",
     "text": "Agent 服务通常需要 Docker、环境变量管理、日志、监控和接口测试。"
+  },
+  {
+    "id": "doc-fastapi",
+    "title": "FastAPI 后端开发",
+    "text": "FastAPI 是基于 Python 的现代 Web 框架，支持异步路由和自动生成 OpenAPI 文档。开发 Agent 服务时，通常会使用 Pydantic 定义请求体和响应体，通过 response_model 校验输出结构。部署阶段需要配置环境变量、日志和监控，并使用 Uvicorn 启动服务，必要时通过 Docker 打包镜像。"
   }
 ]

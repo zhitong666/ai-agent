@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from app.chunking import chunk_documents
+
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 
 # 打开 JSON 文件, 读取并返回 Python 列表
@@ -44,8 +46,10 @@ class RAGRetriever:
             for index in top_indices
         ]
 
-# 读取文档，加载Embedding模型，创建检索器
-def build_retriever(path: Path) -> RAGRetriever:
+# 先加载文档，再切块，再编码
+def build_retriever(path: Path, strategy: str = "fixed") -> RAGRetriever:
     documents = load_documents(path)
+    chunks = chunk_documents(documents, strategy=strategy)
     model = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
-    return RAGRetriever(documents, model)
+    return RAGRetriever(chunks, model)
+    # RAGRetriever 本身保持不动，向后兼容，避免今天改动扩散到 tests/test_rag.py

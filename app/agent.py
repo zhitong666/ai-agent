@@ -47,7 +47,8 @@ def format_context(results: list[dict]) -> str:
     for item in results:
         doc = item["doc"]
         score = item["score"]
-        lines.append(f"{doc['title']}: {doc['text']} (score={score:.3f})")
+        chunk_id = doc.get("chunk_id", doc.get("id", "unknown"))
+        lines.append(f"[{chunk_id}] {doc['title']}: {doc['text']} (score={score:.3f})")
 
     return "\n".join(lines)
 
@@ -88,4 +89,3 @@ def analyze_job(jd_text: str, retriever=None) -> JobAnalysis:
     context = format_context(results) # 把检索结果拼成文本
 
     return generate_analysis(job, context) # 调用 DeepSeek 生成分析
-

@@ -13,7 +13,7 @@ def main() -> None:
     for result in retriever.retrieve(args.query, top_k=3):
         doc = result["doc"]
         score = result["score"]
-        print(f"{score:.3f} | {doc['id']} | {doc['title']}")
+        print(f"{score:.3f} | {doc['chunk_id']} | {doc['title']} | {doc['text']}")
 
 if __name__ == "__main__":
     main()
