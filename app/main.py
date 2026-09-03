@@ -4,8 +4,9 @@ from pydantic import BaseModel, Field
 from app.llm import parse_job_description
 from app.models import JobDescription
 
-from app.agent import analyze_job
-from app.models import JobAnalysis
+from app.agent import analyze_job, answer_question
+from app.models import JobAnalysis, ChatResponse
+
 
 app = FastAPI(title="AI Job Agent", version="0.1.0")
 
@@ -33,3 +34,15 @@ def analyze_jd(request: AnalyzeRequest) -> JobAnalysis:
         raise HTTPException(status_code=422, detail="text must not be empty")
     
     return analyze_job(request.text)
+
+
+class ChatRequest(BaseModel):
+    session_id: str
+    question: str = Field(min_length=1)
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(request: ChatRequest) -> ChatResponse:
+    reply = answer_question(request.session_id, request.question)
+    return ChatResponse(reply=reply)
+
+

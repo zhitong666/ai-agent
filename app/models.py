@@ -17,3 +17,7 @@ class JobAnalysis(BaseModel):
     missing_skills: list[str] = Field(default_factory=list) # 还缺少的技能
     interview_questions: list[str] = Field(default_factory=list) # 可能出现的面试题
     study_plan: list[str] = Field(default_factory=list) # 学习计划建议
+
+
+class ChatResponse(BaseModel):
+    reply: str

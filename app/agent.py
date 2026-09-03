@@ -7,6 +7,8 @@ from app.llm import client, parse_job_description
 from app.models import JobAnalysis
 from app.rag import build_retriever
 
+from app.memory import session_store
+
 ANALYSIS_SYSTEM_PROMPT = """你是 AI 岗位分析师。
 根据岗位信息与知识库检索结果，生成岗位分析。
 必须调用 save_job_analysis 工具。"""
@@ -89,3 +91,37 @@ def analyze_job(jd_text: str, retriever=None) -> JobAnalysis:
     context = format_context(results) # 把检索结果拼成文本
 
     return generate_analysis(job, context) # 调用 DeepSeek 生成分析
+
+
+CHAT_SYSTEM_PROMPT = """你是 AI 岗位咨询助手。
+根据知识库和对话历史回答用户问题，回答要简洁、准确。
+如果知识库没有相关内容，就明确说明不知道。"""
+
+# 当前问题会带上刚检索到的知识上下文。
+# 这里没有用 function calling，而是让模型直接返回文本，因为聊天场景需要自然多轮回答。
+# 调用结束后，把本轮用户问题和模型回答追加进 memory，下一轮就能看到
+
+def answer_question(session_id: str, question: str, retriever=None) -> str:
+    memory = session_store.get(session_id)
+    retriever = retriever or get_retriever()
+
+    results = retriever.retrieve(question, top_k=3)
+    context = format_context(results)
+
+    # *memory.get_messages() 把历史消息展开，放进当前 messages 列表
+    messages = [
+        {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+        *memory.get_messages(),
+        {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
+    ]
+
+    response = client.chat.completions.create(
+        model=os.environ["OPENAI_MODEL"],
+        messages=messages,
+    )
+    reply = response.choices[0].message.content
+
+    memory.add("user", question)
+    memory.add("assistant", reply)
+
+    return reply
