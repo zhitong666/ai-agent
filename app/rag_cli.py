@@ -10,7 +10,7 @@ def main() -> None:
 
     retriever = build_retriever(Path("data/knowledge_base.json"))
 
-    for result in retriever.retrieve(args.query, top_k=3):
+    for result in retriever.retrieve(args.query, top_k=5):
         doc = result["doc"]
         score = result["score"]
         print(f"{score:.3f} | {doc['chunk_id']} | {doc['title']} | {doc['text']}")
