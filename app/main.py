@@ -42,7 +42,6 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    reply = answer_question(request.session_id, request.question)
-    return ChatResponse(reply=reply)
+    return answer_question(request.session_id, request.question)
 
 

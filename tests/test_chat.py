@@ -24,8 +24,31 @@ class FakeRetriever:
             }
         ]
 
+# build_sources 能把一条检索结果转成一个 Source，并正确带出 chunk_id、title、score
 
-def test_answer_question_returns_reply_and_stores_messages():
+def test_build_sources_returns_source_list():
+    results = [
+        {
+            "doc": {
+                "chunk_id": "doc-rag-0",
+                "doc_id": "doc-rag",
+                "title": "RAG",
+                "text": "RAG 通过 Embedding 和向量检索找到相关资料。",
+            },
+            "score": 0.9,
+        }
+    ]
+
+    sources = agent.build_sources(results)
+
+    assert len(sources) == 1
+    assert sources[0].chunk_id == "doc-rag-0"
+    assert sources[0].title == "RAG"
+    assert sources[0].score == 0.9
+
+
+# answer_question 返回 ChatResponse，其中 reply 和 sources 都正确，同时消息仍被追加进 memory
+def test_answer_question_returns_reply_and_sources():
     store = SessionStore()
 
     message = MagicMock()
@@ -42,9 +65,11 @@ def test_answer_question_returns_reply_and_stores_messages():
         "create",
         return_value=response,
     ):
-        reply = agent.answer_question("s1", "什么是 RAG", retriever=FakeRetriever())
+        result = agent.answer_question("s1", "什么是 RAG", retriever=FakeRetriever())
 
-    assert reply == "RAG 是检索增强生成。"
+    assert result.reply == "RAG 是检索增强生成。"
+    assert len(result.sources) == 1
+    assert result.sources[0].chunk_id == "doc-rag-0"
 
     assert store.get("s1").get_messages() == [
         {"role": "user", "content": "什么是 RAG"},
@@ -52,6 +77,7 @@ def test_answer_question_returns_reply_and_stores_messages():
     ]
 
 
+# 历史消息仍然被传进 messages，保证 Day 11 的记忆能力没有因为 Day 12 改动而退化
 def test_answer_question_includes_history_in_messages():
     store = SessionStore()
     store.get("s1").add("user", "上一轮问题")

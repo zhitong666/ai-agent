@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.llm import client, parse_job_description
-from app.models import JobAnalysis
+from app.models import JobAnalysis, ChatResponse, Source
 from app.rag import build_retriever
 
 from app.memory import session_store
@@ -95,17 +95,19 @@ def analyze_job(jd_text: str, retriever=None) -> JobAnalysis:
 
 CHAT_SYSTEM_PROMPT = """你是 AI 岗位咨询助手。
 根据知识库和对话历史回答用户问题，回答要简洁、准确。
+如果使用了知识库内容，请在相关句子末尾用 [chunk_id] 标注来源。
 如果知识库没有相关内容，就明确说明不知道。"""
 
 # 当前问题会带上刚检索到的知识上下文。
 # 这里没有用 function calling，而是让模型直接返回文本，因为聊天场景需要自然多轮回答。
 # 调用结束后，把本轮用户问题和模型回答追加进 memory，下一轮就能看到
 
-def answer_question(session_id: str, question: str, retriever=None) -> str:
+def answer_question(session_id: str, question: str, retriever=None) -> ChatResponse:
     memory = session_store.get(session_id)
     retriever = retriever or get_retriever()
 
     results = retriever.retrieve(question, top_k=3)
+    sources = build_sources(results)
     context = format_context(results)
 
     # *memory.get_messages() 把历史消息展开，放进当前 messages 列表
@@ -124,4 +126,24 @@ def answer_question(session_id: str, question: str, retriever=None) -> str:
     memory.add("user", question)
     memory.add("assistant", reply)
 
-    return reply
+    # sources 来自检索结果，reply 来自模型。模型能根据上下文里的 [chunk_id] 在句子末尾标注来源
+    return ChatResponse(reply=reply, sources=sources)
+
+
+
+def build_sources(results: list[dict]) -> list[Source]:
+    sources = []
+
+    for result in  results:
+        doc = result["doc"]
+        sources.append(
+            Source(
+                # doc.get("chunk_id", doc.get("id", "unknown")) 兼容 Day 8 之前没有 chunk_id 的旧数据，避免 KeyError
+                chunk_id=doc.get("chunk_id", doc.get("id", "unknown")),
+                title=doc["title"],
+                text=doc["text"],
+                score=result["score"],
+            )
+        )
+
+    return sources
