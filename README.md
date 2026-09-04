@@ -10,6 +10,7 @@
 - DeepSeek API
 - sentence-transformers
 - numpy
+- chromadb
 
 ## 环境配置
 
@@ -37,7 +38,42 @@ uv run uvicorn app.main:app --reload
 - GET /health
 - POST /jd/parse
 - POST /jd/analyze
+- POST /chat
 
 ## 检索 CLI
 
 uv run python -m app.rag_cli "AI Agent 需要哪些技能"
+
+### /chat 示例
+
+请求：
+
+POST /chat
+Content-Type: application/json
+
+{
+  "session_id": "s1",
+  "question": "FastAPI 需要掌握什么"
+}
+
+响应：
+
+{
+  "reply": "...",
+  "sources": [
+    {
+      "chunk_id": "doc-fastapi-0",
+      "title": "FastAPI 后端开发",
+      "text": "...",
+      "score": 0.8
+    }
+  ]
+}
+
+## RAG 评估
+
+uv run python -m app.eval_cli --top-k 3
+
+## 向量持久化
+
+向量和元数据持久化在 data/chroma/，重启服务后不会重新 Embedding。
