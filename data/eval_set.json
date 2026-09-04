@@ -1,0 +1,14 @@
+[
+    {
+        "query": "FastAPI 后端需要掌握什么",
+        "relevant_chunk_ids": ["doc-fastapi-0"]
+    },
+    {
+        "query": "RAG 是什么",
+        "relevant_chunk_ids": ["doc-rag-0"]
+    },
+    {
+        "query": "AI Agent 需要哪些能力",
+        "relevant_chunk_ids": ["doc-agent-0"]
+    }
+]
