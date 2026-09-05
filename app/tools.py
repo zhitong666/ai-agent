@@ -1,16 +1,13 @@
-# 负责三件事：
-# - 定义工具是什么：名称、描述、参数Schema、执行函数
-# - 提供 ToolRegistry：注册工具、查找工具、生成OpenAI工具列表
-# - 提供 build_default_registry()：创建当前项目默认工具
-
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.agent import format_context
 
 FINISH_TOOL_NAME = "finish"
+KNOWLEDGE_BASE_PATH = Path("data/knowledge_base.json")
 
-# 不是普通工具，它是“结束循环”的特殊动作，所以单独用 FINISH_TOOL_SCHEMA 表示，不放进注册表
 FINISH_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -28,19 +25,18 @@ FINISH_TOOL_SCHEMA = {
 }
 
 
-# Tool 使用 @dataclass，比普通字典更清晰，每个字段都有明确含义
 @dataclass
 class Tool:
     name: str
     description: str
     parameters: dict
-    handler: Callable # 是真正执行工具的函数，参数是模型返回的 arguments 和 retriever
+    handler: Callable
     input_field: str = "query"
 
 
 class ToolRegistry:
     def __init__(self):
-        self._tools: dict[str, Tool] ={}
+        self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> None:
         if tool.name in self._tools:
@@ -54,7 +50,6 @@ class ToolRegistry:
     def tool_names(self) -> list[str]:
         return list(self._tools)
 
-    # 把注册表里的工具 Schema 和 finish Schema 合并后返回给 DeepSeek
     def to_openai_tools(self) -> list[dict]:
         executable_schemas = []
 
@@ -83,7 +78,18 @@ def search_knowledge(arguments: dict, retriever) -> str:
     return format_context(results)
 
 
-# 以后新增工具，只需要写一个函数，再在 build_default_registry() 里注册
+def _load_knowledge_titles() -> list[str]:
+    with KNOWLEDGE_BASE_PATH.open("r", encoding="utf-8") as file:
+        documents = json.load(file)
+
+    return [doc["title"] for doc in documents]
+
+
+def list_knowledge_titles(arguments: dict, retriever) -> str:
+    titles = _load_knowledge_titles()
+    return "\n".join(titles)
+
+
 def build_default_registry() -> ToolRegistry:
     registry = ToolRegistry()
 
@@ -103,7 +109,21 @@ def build_default_registry() -> ToolRegistry:
                 "required": ["query"],
             },
             handler=search_knowledge,
-            input_field="query"
+            input_field="query",
+        )
+    )
+
+    registry.register(
+        Tool(
+            name="list_knowledge_titles",
+            description="列出知识库中已有的学习主题标题。",
+            parameters={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {},
+            },
+            handler=list_knowledge_titles,
+            input_field="",
         )
     )
 

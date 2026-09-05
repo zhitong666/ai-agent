@@ -33,7 +33,11 @@ def test_to_openai_tools_includes_executable_tool_and_finish():
     schemas = registry.to_openai_tools()
     schema_names = {schema["function"]["name"] for schema in schemas}
 
-    assert schema_names == {"search_knowledge", FINISH_TOOL_NAME}
+    assert schema_names == {
+        "search_knowledge",
+        "list_knowledge_titles",
+        FINISH_TOOL_NAME,
+    }
 
 
 # 直接调用工具函数，验证它能把检索结果格式化成文本
