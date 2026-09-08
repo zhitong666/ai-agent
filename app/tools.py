@@ -32,6 +32,7 @@ class Tool:
     parameters: dict
     handler: Callable
     input_field: str = "query"
+    requires_approval: bool = False
 
 
 class ToolRegistry:
@@ -90,6 +91,13 @@ def list_knowledge_titles(arguments: dict, retriever) -> str:
     return "\n".join(titles)
 
 
+# 目前只是返回投递结果，不真正访问外部系统，重点是模拟审批流程
+def apply_job(arguments: dict, retriever) -> str:
+    company = arguments.get("company", "未知公司")
+    position = arguments.get("position", "未知岗位")
+    return f"已投递岗位：{company} - {position}"
+
+
 def build_default_registry() -> ToolRegistry:
     registry = ToolRegistry()
 
@@ -124,6 +132,25 @@ def build_default_registry() -> ToolRegistry:
             },
             handler=list_knowledge_titles,
             input_field="",
+        )
+    )
+
+    registry.register(
+        Tool(
+            name="apply_job",
+            description="向指定公司和岗位投递当前求职申请。该操作会影响外部系统，需要人工确认。",
+            parameters={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "company": {"type": "string", "description": "公司名称"},
+                    "position": {"type": "string", "description": "岗位名称"},
+                },
+                "required": ["company", "position"],
+            },
+            handler=apply_job,
+            input_field="position", # 表示步骤轨迹里用岗位名作为输入摘要
+            requires_approval=True, # 表示这个工具不能自动执行
         )
     )
 

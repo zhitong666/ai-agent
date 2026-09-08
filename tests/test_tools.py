@@ -36,6 +36,7 @@ def test_to_openai_tools_includes_executable_tool_and_finish():
     assert schema_names == {
         "search_knowledge",
         "list_knowledge_titles",
+        "apply_job",
         FINISH_TOOL_NAME,
     }
 

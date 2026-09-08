@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from collections.abc import Callable
 
 from openai import APIConnectionError, APITimeoutError, RateLimitError
 
@@ -11,6 +12,7 @@ from app.tools import FINISH_TOOL_NAME, build_default_registry
 
 REACT_SYSTEM_PROMPT = """你是 AI 岗位咨询 Agent。
 先用 search_knowledge 或 list_knowledge_titles 了解知识库，再根据结果回答。
+如果调用 apply_job，必须先得到用户确认。
 只有当你已经能给出最终答案时，才调用 finish。"""
 
 
@@ -23,6 +25,20 @@ def _tool_call_payload(tool_call, arguments, call_id):
             "arguments": json.dumps(arguments, ensure_ascii=False),
         },
     }
+
+
+def _execute_tool(tool, arguments, retriever, approve_tool_call):
+    try:
+        if tool.requires_approval:
+            if approve_tool_call is None:
+                return f"工具 {tool.name} 需要人工确认，但当前没有审批处理程序。"
+
+            if not approve_tool_call(tool.name, arguments):
+                return f"工具 {tool.name} 已被用户拒绝。"
+
+        return tool.handler(arguments, retriever=retriever)
+    except Exception as exc:
+        return f"工具 {tool.name} 执行失败: {exc}"
 
 
 # 负责重试
@@ -54,6 +70,7 @@ def run_react_loop(
     max_steps: int = 5,
     llm_max_retries: int = 3,
     timeout: int = 10,
+    approve_tool_call: Callable[[str, dict], bool] | None = None, # 是一个回调函数，返回 True 表示用户批准，False 表示拒绝
 ) -> ReactResult:
     retriever = retriever or get_retriever()
     registry = build_default_registry()
@@ -93,12 +110,14 @@ def run_react_loop(
             if tool.input_field:
                 action_input = arguments.get(tool.input_field) or question
 
-            # 工具执行放在 try/except 中，失败时降级为错误文本
-            try: 
-                observation = tool.handler(arguments, retriever=retriever)
-            except Exception as exc:
-                observation = f"工具 {tool_name} 执行失败: {exc}"
-
+            # 统一处理审批、执行和异常
+            observation = _execute_tool(
+                tool,
+                arguments,
+                retriever,
+                approve_tool_call,
+            )
+            
             call_id = getattr(tool_call, "id", None) or f"call_{len(steps)}"
 
             steps.append(
