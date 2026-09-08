@@ -9,6 +9,11 @@ from app.agent import get_retriever
 from app.llm import client
 from app.models import ReactResult, ReactStep
 from app.tools import FINISH_TOOL_NAME, build_default_registry
+from app.guards import (
+    contains_prompt_injection,
+    validate_final_answer,
+    validate_tool_arguments,
+)
 
 REACT_SYSTEM_PROMPT = """你是 AI 岗位咨询 Agent。
 先用 search_knowledge 或 list_knowledge_titles 了解知识库，再根据结果回答。
@@ -72,6 +77,9 @@ def run_react_loop(
     timeout: int = 10,
     approve_tool_call: Callable[[str, dict], bool] | None = None, # 是一个回调函数，返回 True 表示用户批准，False 表示拒绝
 ) -> ReactResult:
+    if contains_prompt_injection(question):
+        return ReactResult(answer="我无法处理包含指令注入的内容。", steps=[])
+
     retriever = retriever or get_retriever()
     registry = build_default_registry()
     tools = registry.to_openai_tools()
@@ -98,7 +106,8 @@ def run_react_loop(
             arguments = json.loads(tool_call.function.arguments or "{}")
 
             if tool_name == FINISH_TOOL_NAME:
-                return ReactResult(answer=arguments.get("answer", ""), steps=steps)
+                answer = validate_final_answer(arguments.get("answer", ""))
+                return ReactResult(answer=answer, steps=steps)
 
             tool = registry.get_tool(tool_name)
 
@@ -110,13 +119,18 @@ def run_react_loop(
             if tool.input_field:
                 action_input = arguments.get(tool.input_field) or question
 
+            guard_error = validate_tool_arguments(tool_name, arguments)
+            
+            if guard_error:
+                observation = f"工具 {tool_name} 参数校验失败: {guard_error}"
             # 统一处理审批、执行和异常
-            observation = _execute_tool(
-                tool,
-                arguments,
-                retriever,
-                approve_tool_call,
-            )
+            else: 
+                observation = _execute_tool(
+                    tool,
+                    arguments,
+                    retriever,
+                    approve_tool_call,
+                )
             
             call_id = getattr(tool_call, "id", None) or f"call_{len(steps)}"
 
