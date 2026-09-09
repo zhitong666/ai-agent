@@ -2,18 +2,20 @@ import json
 import os
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from openai import APIConnectionError, APITimeoutError, RateLimitError
 
 from app.agent import get_retriever
-from app.llm import client
-from app.models import ReactResult, ReactStep
-from app.tools import FINISH_TOOL_NAME, build_default_registry
+from app.agent_state import AgentState, save_checkpoint
 from app.guards import (
     contains_prompt_injection,
     validate_final_answer,
     validate_tool_arguments,
 )
+from app.llm import client
+from app.models import ReactResult, ReactStep
+from app.tools import FINISH_TOOL_NAME, build_default_registry
 
 REACT_SYSTEM_PROMPT = """你是 AI 岗位咨询 Agent。
 先用 search_knowledge 或 list_knowledge_titles 了解知识库，再根据结果回答。
@@ -76,90 +78,126 @@ def run_react_loop(
     llm_max_retries: int = 3,
     timeout: int = 10,
     approve_tool_call: Callable[[str, dict], bool] | None = None, # 是一个回调函数，返回 True 表示用户批准，False 表示拒绝
+    state: AgentState | None = None,
+    checkpoint_path: Path | None = None,
 ) -> ReactResult:
-    if contains_prompt_injection(question):
-        return ReactResult(answer="我无法处理包含指令注入的内容。", steps=[])
+    if state is None:
+        state = AgentState(question=question)
 
-    retriever = retriever or get_retriever()
-    registry = build_default_registry()
-    tools = registry.to_openai_tools()
+    state.question = question
+    state.mark_running()
 
-    messages = [
-        {"role": "system", "content": REACT_SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
-    steps: list[ReactStep] = []
+    try:
+        if contains_prompt_injection(question):
+            state.mark_finished("我无法处理包含指令注入的内容。")
 
-    for _ in range(max_steps):
-        response = _call_model(messages, tools, llm_max_retries, timeout)
+            if checkpoint_path:
+                save_checkpoint(state, checkpoint_path)
 
-        message = response.choices[0].message
+            return ReactResult(answer="我无法处理包含指令注入的内容。", steps=[])
 
-        if not message.tool_calls:
-            raise RuntimeError("模型没有返回 tool_calls")
+        retriever = retriever or get_retriever()
+        registry = build_default_registry()
+        tools = registry.to_openai_tools()
 
-        assistant_tool_calls = []
-        tool_result_messages = []
+        messages = [
+            {"role": "system", "content": REACT_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ]
+        steps: list[ReactStep] = []
 
-        for tool_call in message.tool_calls:
-            tool_name = tool_call.function.name
-            arguments = json.loads(tool_call.function.arguments or "{}")
+        for _ in range(max_steps):
+            response = _call_model(messages, tools, llm_max_retries, timeout)
 
-            if tool_name == FINISH_TOOL_NAME:
-                answer = validate_final_answer(arguments.get("answer", ""))
-                return ReactResult(answer=answer, steps=steps)
+            message = response.choices[0].message
 
-            tool = registry.get_tool(tool_name)
+            if not message.tool_calls:
+                raise RuntimeError("模型没有返回 tool_calls")
 
-            if tool is None:
-                raise RuntimeError(f"未知工具: {tool_name}")
+            assistant_tool_calls = []
+            tool_result_messages = []
 
-            action_input = ""
+            for tool_call in message.tool_calls:
+                tool_name = tool_call.function.name
+                arguments = json.loads(tool_call.function.arguments or "{}")
 
-            if tool.input_field:
-                action_input = arguments.get(tool.input_field) or question
+                if tool_name == FINISH_TOOL_NAME:
+                    answer = validate_final_answer(arguments.get("answer", ""))
+                    state.steps = list(steps)
+                    state.mark_finished(answer)
 
-            guard_error = validate_tool_arguments(tool_name, arguments)
-            
-            if guard_error:
-                observation = f"工具 {tool_name} 参数校验失败: {guard_error}"
-            # 统一处理审批、执行和异常
-            else: 
-                observation = _execute_tool(
-                    tool,
-                    arguments,
-                    retriever,
-                    approve_tool_call,
+                    if checkpoint_path:
+                        save_checkpoint(state, checkpoint_path)
+
+                    return ReactResult(answer=answer, steps=steps)
+
+                tool = registry.get_tool(tool_name)
+
+                if tool is None:
+                    raise RuntimeError(f"未知工具: {tool_name}")
+
+                action_input = ""
+
+                if tool.input_field:
+                    action_input = arguments.get(tool.input_field) or question
+
+                guard_error = validate_tool_arguments(tool_name, arguments)
+
+                if guard_error:
+                    observation = f"工具 {tool_name} 参数校验失败: {guard_error}"
+                else:
+                    observation = _execute_tool(
+                        tool,
+                        arguments,
+                        retriever,
+                        approve_tool_call,
+                    )
+
+                call_id = getattr(tool_call, "id", None) or f"call_{len(steps)}"
+
+                steps.append(
+                    ReactStep(
+                        action=tool_name,
+                        action_input=action_input,
+                        observation=observation,
+                    )
                 )
-            
-            call_id = getattr(tool_call, "id", None) or f"call_{len(steps)}"
 
-            steps.append(
-                ReactStep(
-                    action=tool_name,
-                    action_input=action_input,
-                    observation=observation,
+                assistant_tool_calls.append(
+                    _tool_call_payload(tool_call, arguments, call_id)
                 )
-            )
+                tool_result_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": observation,
+                    }
+                )
 
-            assistant_tool_calls.append(
-                _tool_call_payload(tool_call, arguments, call_id)
-            )
-            tool_result_messages.append(
+            messages.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": observation,
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": assistant_tool_calls,
                 }
             )
+            messages.extend(tool_result_messages)
 
-        messages.append(
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": assistant_tool_calls,
-            }
-        )
-        messages.extend(tool_result_messages)
+            state.steps = list(steps)
 
-    raise RuntimeError("ReAct 循环超过最大步数")
+            if checkpoint_path:
+                save_checkpoint(state, checkpoint_path)
+
+        state.steps = list(steps)
+        raise RuntimeError("ReAct 循环超过最大步数")
+
+    except Exception:
+        state.mark_failed()
+
+        if checkpoint_path:
+            try:
+                save_checkpoint(state, checkpoint_path)
+            except OSError:
+                pass
+
+        raise
