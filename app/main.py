@@ -1,10 +1,10 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.llm import parse_job_description
 from app.models import JobDescription
-
-from app.agent import analyze_job, answer_question
+from app.agent import analyze_job, answer_question, stream_answer_question
 from app.models import JobAnalysis, ChatResponse
 
 
@@ -44,4 +44,14 @@ class ChatRequest(BaseModel):
 def chat(request: ChatRequest) -> ChatResponse:
     return answer_question(request.session_id, request.question)
 
+@app.post("/chat/stream")
+def chat_stream(request: ChatRequest):
+    if not request.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+
+    # StreamingResponse 接收一个生成器，边生成边返回
+    return StreamingResponse(
+        stream_answer_question(request.session_id, request.question),
+        media_type="text/event-stream" # 告诉浏览器这是 SSE 流
+    )
 

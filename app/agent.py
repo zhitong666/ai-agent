@@ -2,12 +2,14 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
+from collections.abc import Iterator
 
 from app.llm import client, parse_job_description
 from app.models import JobAnalysis, ChatResponse, Source
 from app.rag import build_retriever
-
 from app.memory import session_store
+from app.streaming import sse_event
+
 
 ANALYSIS_SYSTEM_PROMPT = """你是 AI 岗位分析师。
 根据岗位信息与知识库检索结果，生成岗位分析。
@@ -129,6 +131,48 @@ def answer_question(session_id: str, question: str, retriever=None) -> ChatRespo
     # sources 来自检索结果，reply 来自模型。模型能根据上下文里的 [chunk_id] 在句子末尾标注来源
     return ChatResponse(reply=reply, sources=sources)
 
+
+def stream_answer_question(
+    session_id: str,
+    question: str,
+    retriever=None,
+) -> Iterator[str]:
+    memory = session_store.get(session_id)
+    retriever = retriever or get_retriever()
+
+    results = retriever.retrieve(question, top_k=3)
+    context = format_context(results)
+
+    messages = [
+        {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+        *memory.get_messages(),
+        {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
+    ]
+    
+    response = client.chat.completions.create(
+        model=os.environ["OPENAI_MODEL"],
+        messages=messages,
+        stream=True, # 让模型以增量方式返回
+    )
+
+    reply_parts = []
+
+    for chunk in response:
+        # 每个 delta 都是模型刚生成的一小块文本
+        delta = chunk.choices[0].delta.content
+
+        # 会跳过 None 和空字符串
+        if delta:
+            reply_parts.append(delta) # 用来在最后拼成完整答案
+            yield sse_event("chunk", delta)
+
+    reply = "".join(reply_parts)
+
+    memory.add("user", question)
+    memory.add("assistant", reply) # 完整答案拼好后，才写入 session_store，保证记忆里保存的是完整内容，而不是碎片
+
+    # 最后发送 done 事件，前端可以据此关闭加载状态
+    yield sse_event("done", "")
 
 
 def build_sources(results: list[dict]) -> list[Source]:
