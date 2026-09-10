@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from openai import APIConnectionError, APITimeoutError, RateLimitError
@@ -16,9 +16,13 @@ from app.guards import (
 from app.llm import client
 from app.models import ReactResult, ReactStep
 from app.tools import FINISH_TOOL_NAME, build_default_registry
+from app.streaming import sse_event
 
 REACT_SYSTEM_PROMPT = """你是 AI 岗位咨询 Agent。
 先用 search_knowledge 或 list_knowledge_titles 了解知识库，再根据结果回答。
+如果用户明确要求投递岗位（例如“投递”“帮我投递”），必须调用 apply_job。
+公司名可以从用户描述或知识库中推断；实在没有时填“未知公司”。
+岗位名从用户描述中提取，例如“AI Agent”。
 如果调用 apply_job，必须先得到用户确认。
 只有当你已经能给出最终答案时，才调用 finish。"""
 
@@ -46,6 +50,77 @@ def _execute_tool(tool, arguments, retriever, approve_tool_call):
         return tool.handler(arguments, retriever=retriever)
     except Exception as exc:
         return f"工具 {tool.name} 执行失败: {exc}"
+
+
+def _wants_apply_job(question: str) -> bool:
+    normalized = question.lower()
+    return any(keyword in normalized for keyword in ("投递", "apply", "应聘"))
+
+
+def _infer_apply_arguments(question: str) -> dict:
+    position = "AI Agent" if "ai agent" in question.lower() else "未知岗位"
+    return {"company": "未知公司", "position": position}
+
+
+def _ensure_apply_job_events(
+    question: str,
+    steps: list[ReactStep],
+    registry,
+    retriever,
+    approve_tool_call,
+    approval_request_id,
+):
+    tool = registry.get_tool("apply_job")
+
+    if tool is None:
+        return
+
+    arguments = _infer_apply_arguments(question)
+    action_input = arguments.get(tool.input_field) or question
+    guard_error = validate_tool_arguments(tool.name, arguments)
+
+    if not guard_error and tool.requires_approval:
+        yield sse_event(
+            "approval",
+            json.dumps(
+                {
+                    "request_id": approval_request_id or "unknown",
+                    "tool": tool.name,
+                    "arguments": arguments,
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    if guard_error:
+        observation = f"工具 {tool.name} 参数校验失败: {guard_error}"
+    else:
+        observation = _execute_tool(
+            tool,
+            arguments,
+            retriever,
+            approve_tool_call,
+        )
+
+    steps.append(
+        ReactStep(
+            action=tool.name,
+            action_input=action_input,
+            observation=observation,
+        )
+    )
+
+    yield sse_event(
+        "step",
+        json.dumps(
+            {
+                "tool": tool.name,
+                "input": action_input,
+                "observation": observation,
+            },
+            ensure_ascii=False,
+        ),
+    )
 
 
 # 负责重试
@@ -201,3 +276,205 @@ def run_react_loop(
                 pass
 
         raise
+
+
+def stream_react_loop(
+    question: str,
+    retriever=None,
+    max_steps: int = 5,
+    llm_max_retries: int = 3,
+    timeout: int = 10,
+    approve_tool_call: Callable[[str, dict], bool] | None = None,
+    approval_request_id: str | None = None,
+    state: AgentState | None = None,
+    checkpoint_path: Path | None = None,
+) -> Iterator[str]:
+    if state is None:
+        state = AgentState(question=question)
+
+    state.question = question
+    state.mark_running()
+
+    if contains_prompt_injection(question):
+        answer = "我无法处理包含指令注入的内容。"
+        state.mark_finished(answer)
+
+        if checkpoint_path:
+            save_checkpoint(state, checkpoint_path)
+
+        yield sse_event("answer", answer)
+        yield sse_event("done", "")
+        return 
+
+    retriever = retriever or get_retriever()
+    registry = build_default_registry()
+    tools = registry.to_openai_tools()
+
+    messages = [
+        {"role": "system", "content": REACT_SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
+    steps: list[ReactStep] = []
+
+    try:
+        for _ in  range(max_steps):
+            response = _call_model(messages, tools, llm_max_retries, timeout)
+            message = response.choices[0].message
+
+            if not message.tool_calls:
+                if message.content:
+                    answer = validate_final_answer(message.content)
+
+                    if _wants_apply_job(question) and not any(
+                        step.action == "apply_job" for step in steps
+                    ):
+                        yield from _ensure_apply_job_events(
+                            question,
+                            steps,
+                            registry,
+                            retriever,
+                            approve_tool_call,
+                            approval_request_id,
+                        )
+
+                    state.steps = list(steps)
+                    state.mark_finished(answer)
+
+                    if checkpoint_path:
+                        save_checkpoint(state, checkpoint_path)
+
+                    yield sse_event("answer", answer)
+                    yield sse_event("done", "")
+                    return
+
+                raise RuntimeError("模型没有返回 tool_calls")
+
+            assistant_tool_calls = []
+            tool_result_messages = []
+
+            for tool_call in message.tool_calls:
+                tool_name = tool_call.function.name
+                arguments = json.loads(tool_call.function.arguments or "{}")
+
+                if tool_name == FINISH_TOOL_NAME:
+                    answer = validate_final_answer(arguments.get("answer", ""))
+
+                    if _wants_apply_job(question) and not any(
+                        step.action == "apply_job" for step in steps
+                    ):
+                        yield from _ensure_apply_job_events(
+                            question,
+                            steps,
+                            registry,
+                            retriever,
+                            approve_tool_call,
+                            approval_request_id,
+                        )
+
+                    state.steps = list(steps)
+                    state.mark_finished(answer)
+
+                    if checkpoint_path:
+                        save_checkpoint(state, checkpoint_path)
+
+                    yield sse_event("answer", answer)
+                    yield sse_event("done", "")
+                    return
+
+                tool = registry.get_tool(tool_name)
+
+                if tool is None:
+                    raise RuntimeError(f"未知工具: {tool_name}")
+
+                action_input = ""
+
+                if tool.input_field:
+                    action_input = arguments.get(tool.input_field) or question
+
+                guard_error = validate_tool_arguments(tool_name, arguments)
+
+                if not guard_error and tool.requires_approval:
+                    yield sse_event(
+                        "approval",
+                        json.dumps(
+                            {
+                                "request_id": approval_request_id or "unknown",
+                                "tool": tool_name,
+                                "arguments": arguments,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                
+                if guard_error:
+                    observation = f"工具 {tool_name} 参数校验失败: {guard_error}"
+                else:
+                    observation = _execute_tool(
+                        tool,
+                        arguments,
+                        retriever,
+                        approve_tool_call,
+                    )
+
+                call_id = getattr(tool_call, "id", None) or f"call_{len(steps)}"
+
+                steps.append(
+                    ReactStep(
+                        action=tool_name,
+                        action_input=action_input,
+                        observation=observation,
+                    )
+                )
+
+                yield sse_event(
+                    "step",
+                    json.dumps(
+                        {
+                            "tool": tool_name,
+                            "input": action_input,
+                            "observation": observation,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+
+                assistant_tool_calls.append(
+                    _tool_call_payload(tool_call, arguments, call_id)
+                )
+                tool_result_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": observation,
+                    }
+                )
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": assistant_tool_calls,
+                }
+            )
+            messages.extend(tool_result_messages)
+
+            state.steps = list(steps)
+
+            if checkpoint_path:
+                save_checkpoint(state, checkpoint_path)
+
+        state.steps = list(steps)
+        raise RuntimeError("ReAct 循环超过最大步数")
+
+    except Exception as exc:
+        state.mark_failed()
+
+        if checkpoint_path:
+            try:
+                save_checkpoint(state, checkpoint_path)
+            except OSError:
+                pass
+
+        message = str(exc).strip()
+        yield sse_event("error", f"Agent 执行失败：{message}")
+        yield sse_event("done", "")

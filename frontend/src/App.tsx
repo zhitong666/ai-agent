@@ -1,18 +1,36 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Send, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import { Check, LoaderCircle, Send, Trash2, X } from "lucide-react";
 import { parseSSE } from "./lib/sseParser";
 import "./App.css";
+
+type Mode = "chat" | "agent";
+
+type Step = {
+  tool: string;
+  input: string;
+  observation: string;
+};
+
+type Approval = {
+  request_id: string;
+  tool: string;
+  arguments: Record<string, string>;
+};
 
 type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
   streaming?: boolean;
+  steps?: Step[];
+  approval?: Approval | null;
 };
 
 const SESSION_ID = "default";
 
 export default function App() {
+  const [mode, setMode] = useState<Mode>("agent");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -46,14 +64,18 @@ export default function App() {
       role: "assistant",
       content: "",
       streaming: true,
+      steps: mode === "agent" ? [] : undefined,
+      approval: null,
     };
 
     setMessages((current) => [...current, userMessage, assistantMessage]);
     setInput("");
     setSending(true);
 
+    const endpoint = mode === "chat" ? "/chat/stream" : "/agent/stream";
+
     try {
-      const response = await fetch("/chat/stream", {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -84,11 +106,63 @@ export default function App() {
         buffer = remaining;
 
         for (const item of events) {
+          if (item.event === "error") {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      content: message.content || item.data,
+                      streaming: false,
+                      approval: null,
+                    }
+                  : message,
+              ),
+            );
+          }
+
           if (item.event === "chunk") {
             setMessages((current) =>
               current.map((message) =>
                 message.id === assistantId
                   ? { ...message, content: message.content + item.data }
+                  : message,
+              ),
+            );
+          }
+
+          if (item.event === "answer") {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? { ...message, content: item.data }
+                  : message,
+              ),
+            );
+          }
+
+          if (item.event === "step") {
+            const step = JSON.parse(item.data) as Step;
+
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      steps: [...(message.steps ?? []), step],
+                    }
+                  : message,
+              ),
+            );
+          }
+
+          if (item.event === "approval") {
+            const approval = JSON.parse(item.data) as Approval;
+
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? { ...message, approval }
                   : message,
               ),
             );
@@ -105,9 +179,45 @@ export default function App() {
           }
         }
       }
+    } catch (error) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                content:
+                  error instanceof Error ? error.message : "请求失败，请稍后重试。",
+                streaming: false,
+              }
+            : message,
+        ),
+      );
     } finally {
       setSending(false);
     }
+  }
+
+  async function handleApproval(
+    messageId: string,
+    approval: Approval,
+    approved: boolean,
+  ) {
+    await fetch("/agent/approve", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: approval.request_id,
+        approved,
+      }),
+    });
+
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId ? { ...message, approval: null } : message,
+      ),
+    );
   }
 
   return (
@@ -117,14 +227,33 @@ export default function App() {
           <p className="eyebrow">AI Job Agent</p>
           <h1>岗位咨询助手</h1>
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="清空对话"
-          onClick={() => setMessages([])}
-        >
-          <Trash2 size={18} />
-        </button>
+        <div className="mode-switch">
+          <button
+            type="button"
+            className={mode === "chat" ? "active" : ""}
+            title="使用知识库问答"
+            onClick={() => setMode("chat")}
+          >
+            问答
+          </button>
+          <button
+            type="button"
+            className={mode === "agent" ? "active" : ""}
+            title="使用 Agent 自动调用工具"
+            onClick={() => setMode("agent")}
+          >
+            Agent
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="清空对话"
+            title="清空对话"
+            onClick={() => setMessages([])}
+          >
+            <Trash2 size={18} />
+          </button>
+        </div>
       </header>
 
       <section ref={listRef} className="message-list">
@@ -141,6 +270,46 @@ export default function App() {
               }`}
             >
               <p>{message.content}</p>
+
+              {message.steps?.length ? (
+                <ul className="steps">
+                  {message.steps.map((step, index) => (
+                    <li className="step" key={`${step.tool}-${index}`}>
+                      <strong>{step.tool}</strong>
+                      <span>{step.input}</span>
+                      <small>{step.observation}</small>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {message.approval ? (
+                <div className="approval">
+                  <span>
+                    是否批准 {message.approval.tool}？
+                  </span>
+                  <div className="approval-actions">
+                    <button
+                      type="button"
+                      title="批准"
+                      onClick={() =>
+                        handleApproval(message.id, message.approval!, true)
+                      }
+                    >
+                      <Check size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      title="拒绝"
+                      onClick={() =>
+                        handleApproval(message.id, message.approval!, false)
+                      }
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ))
         )}
@@ -150,7 +319,7 @@ export default function App() {
         <input
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder="例如：FastAPI 需要掌握什么？"
+          placeholder="例如：帮我分析这个岗位并投递"
           disabled={sending}
         />
         <button type="submit" disabled={!input.trim() || sending}>

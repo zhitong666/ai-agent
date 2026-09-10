@@ -1,11 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+import uuid
 
 from app.llm import parse_job_description
 from app.models import JobDescription
 from app.agent import analyze_job, answer_question, stream_answer_question
 from app.models import JobAnalysis, ChatResponse
+from app.approval import approval_store
+from app.react import stream_react_loop
 
 
 app = FastAPI(title="AI Job Agent", version="0.1.0")
@@ -55,3 +58,37 @@ def chat_stream(request: ChatRequest):
         media_type="text/event-stream" # 告诉浏览器这是 SSE 流
     )
 
+
+class AgentStreamRequest(BaseModel):
+    question: str = Field(min_length=1)
+    request_id: str | None = None
+
+
+class ApprovalRequest(BaseModel):
+    request_id: str
+    approved: bool
+
+@app.post("/agent/stream")
+def agent_stream(request: AgentStreamRequest):
+    if not request.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+
+    request_id = request.request_id or str(uuid.uuid4())
+
+    def approve_tool_call(tool_name, arguments):
+        return approval_store.wait(request_id)
+
+    return StreamingResponse(
+        stream_react_loop(
+            request.question,
+            approve_tool_call=approve_tool_call,
+            approval_request_id=request_id,
+        ),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/agent/approve")
+def agent_approve(request: ApprovalRequest):
+    approval_store.decide(request.request_id, request.approved)
+    return {"status": "ok"}

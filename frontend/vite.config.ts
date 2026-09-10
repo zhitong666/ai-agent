@@ -6,7 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/chat/stream": {
+      "/chat": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true
+      },
+      "/agent": {
         target: "http://127.0.0.1:8000",
         changeOrigin: true
       }

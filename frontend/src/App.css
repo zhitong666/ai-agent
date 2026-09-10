@@ -14,17 +14,22 @@ body {
 .chat {
   width: min(820px, 100%);
   height: 100vh;
+  max-height: 100svh;
   margin: 0 auto;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  text-align: left;
+  overflow: hidden;
 }
 
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
   border-bottom: 1px solid #e4e4e7;
   padding-bottom: 12px;
 }
@@ -36,9 +41,32 @@ body {
   letter-spacing: 0.08em;
 }
 
-h1 {
+.chat-header h1 {
   margin: 4px 0 0;
   font-size: 24px;
+  letter-spacing: 0;
+}
+
+.mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-switch button {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #52525b;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
 }
 
 .icon-button {
@@ -55,11 +83,12 @@ h1 {
 
 .message-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 8px 0;
+  padding: 8px 2px;
 }
 
 .empty-state {
@@ -68,15 +97,18 @@ h1 {
 }
 
 .message {
-  max-width: 72%;
+  max-width: 78%;
   padding: 10px 12px;
   border-radius: 8px;
   line-height: 1.55;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message p {
   margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message.user {
@@ -96,7 +128,71 @@ h1 {
   animation: blink 1s steps(1) infinite;
 }
 
+.steps {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+}
+
+.step strong {
+  color: #18181b;
+}
+
+.step span {
+  color: #3f3f46;
+  overflow-wrap: anywhere;
+}
+
+.step small {
+  color: #52525b;
+  overflow-wrap: anywhere;
+}
+
+.approval {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #18181b;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.approval-actions button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #ffffff;
+  cursor: pointer;
+}
+
 .composer {
+  flex-shrink: 0;
   display: flex;
   gap: 8px;
 }
@@ -109,6 +205,7 @@ h1 {
   border-radius: 8px;
   font-size: 15px;
   background: #ffffff;
+  color: #18181b;
 }
 
 .composer button {
