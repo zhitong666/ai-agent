@@ -9,6 +9,7 @@ from app.agent import analyze_job, answer_question, stream_answer_question
 from app.models import JobAnalysis, ChatResponse
 from app.approval import approval_store
 from app.react import stream_react_loop
+from app.observability import observability_store, trace_stream
 
 
 app = FastAPI(title="AI Job Agent", version="0.1.0")
@@ -78,13 +79,20 @@ def agent_stream(request: AgentStreamRequest):
     def approve_tool_call(tool_name, arguments):
         return approval_store.wait(request_id)
 
+    stream = stream_react_loop(
+        request.question,
+        approve_tool_call=approve_tool_call,
+        approval_request_id=request_id,
+    )
+
     return StreamingResponse(
-        stream_react_loop(
+        trace_stream(
+            observability_store,
             request.question,
-            approve_tool_call=approve_tool_call,
-            approval_request_id=request_id,
+            request_id,
+            stream,
         ),
-        media_type="text/event-stream",
+        media_type="text/event-stream"
     )
 
 
@@ -92,3 +100,15 @@ def agent_stream(request: AgentStreamRequest):
 def agent_approve(request: ApprovalRequest):
     approval_store.decide(request.request_id, request.approved)
     return {"status": "ok"}
+
+
+@app.get("/agent/traces/{trace_id}")
+def get_agent_trace(trace_id: str):
+    trace = observability_store.get_trace(trace_id)
+
+    if trace is None:
+        raise HTTPException(status_code=404, detail="trace not found")
+
+    return trace.model_dump()
+
+    
