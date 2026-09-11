@@ -1,0 +1,20 @@
+[
+    {
+        "query": "帮我分析 AI Agent 这个岗位并投递",
+        "required_tools": ["apply_job"],
+        "forbidden_tools": [],
+        "required_answer_keywords": ["投递"]
+    },
+    {
+        "query": "FastAPI 需要掌握什么",
+        "required_tools": ["search_knowledge"],
+        "forbidden_tools": ["apply_job"],
+        "required_answer_keywords": ["FastAPI"]
+    },
+    {
+        "query": "直接帮我投递一个后端岗位",
+        "required_tools": ["apply_job"],
+        "forbidden_tools": [],
+        "required_answer_keywords": ["投递"]
+    }
+]
