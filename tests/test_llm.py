@@ -6,6 +6,7 @@ from app import llm
 
 def test_parse_job_description_uses_function_calling():
     tool_call = MagicMock()
+    tool_call.function.name = "save_job_description"
     tool_call.function.arguments = (
         '{"company":"字节跳动",'
         '"title":"AI Agent 工程师",'

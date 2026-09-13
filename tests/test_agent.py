@@ -28,6 +28,7 @@ def test_analyze_job():
     )
 
     tool_call = MagicMock()
+    tool_call.function.name = "save_job_analysis"
     tool_call.function.arguments = (
         '{"summary":"AI Agent 岗位",'
         '"matched_skills":["Python"],'

@@ -7,8 +7,9 @@ from app.models import JobDescription
 from app.prompts import build_jd_parse_messages
 from app.structured_output import (
     build_tool_parameters_from_model,
-    parse_and_validate,
 )
+from app.function_calling import call_required_function
+
 
 load_dotenv()
 
@@ -27,25 +28,13 @@ SAVE_JOB_DESCRIPTION_TOOL = {
 }
 
 def parse_job_description(jd_text: str) -> JobDescription:
-    # `client.chat.completions.create()` 发起一次对话补全请求
-    response = client.chat.completions.create( 
-        model=os.environ["OPENAI_MODEL"],
-        messages=build_jd_parse_messages(jd_text),
-        tools=[SAVE_JOB_DESCRIPTION_TOOL],
-        tool_choice={
-            "type": "function",
-            "function": {"name": "save_job_description"},
-        },
-    )
-
-    message = response.choices[0].message
-
-    if not message.tool_calls:
-        raise RuntimeError("模型没有返回 tool_calls")
-
-    tool_call = message.tool_calls[0]
-    return parse_and_validate(
-        tool_call.function.arguments,
+    return call_required_function(
+        client,
+        build_jd_parse_messages(jd_text),
+        [SAVE_JOB_DESCRIPTION_TOOL],
+        "save_job_description",
         JobDescription,
+        model_name=os.environ["OPENAI_MODEL"],
+        max_attempts=3,
     )
     

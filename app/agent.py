@@ -12,8 +12,8 @@ from app.context import ContextBudget
 from app.prompts import build_analysis_messages, build_chat_messages
 from app.structured_output import (
     build_tool_parameters_from_model,
-    parse_and_validate,
 )
+from app.function_calling import call_required_function
 
 
 ANALYSIS_TOOL = {
@@ -41,23 +41,15 @@ def format_context(results: list[dict]) -> str:
     return "\n".join(lines)
 
 def generate_analysis(job, context: str) -> JobAnalysis:
-    response = client.chat.completions.create(
-        model=os.environ["OPENAI_MODEL"],
-        messages=build_analysis_messages(job, context, cot=True),
-        tools=[ANALYSIS_TOOL],
-        tool_choice={
-            "type": "function",
-            "function": {"name": "save_job_analysis"},
-        },
+    return call_required_function(
+        client,
+        build_analysis_messages(job, context, cot=True),
+        [ANALYSIS_TOOL],
+        "save_job_analysis",
+        JobAnalysis,
+        model_name=os.environ["OPENAI_MODEL"],
+        max_attempts=3,
     )
-
-    message = response.choices[0].message
-
-    if not message.tool_calls:
-        raise RuntimeError("模型没有返回 tool_calls")
-
-    arguments = message.tool_calls[0].function.arguments
-    return parse_and_validate(arguments, JobAnalysis)
 
 # 多步流程的入口
 def analyze_job(jd_text: str, retriever=None) -> JobAnalysis:

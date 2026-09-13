@@ -2,9 +2,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-class JobDescription(BaseModel): 
-    company: str = Field(..., description="公司名称")
-    title: str = Field(..., description="岗位名称")
+class JobDescription(BaseModel):
+    company: str = Field(..., min_length=1, description="公司名称")
+    title: str = Field(..., min_length=1, description="岗位名称")
     seniority: Literal["junior", "mid", "senior", "staff", "unknown"] = Field(
         "unknown",
         description="岗位级别",
@@ -15,11 +15,11 @@ class JobDescription(BaseModel):
     domain: str = Field("", description="业务领域")
 
 class JobAnalysis(BaseModel):
-    summary: str # 岗位概述
-    matched_skills: list[str] = Field(default_factory=list) # 当前可能已经具备的技能
-    missing_skills: list[str] = Field(default_factory=list) # 还缺少的技能
-    interview_questions: list[str] = Field(default_factory=list) # 可能出现的面试题
-    study_plan: list[str] = Field(default_factory=list) # 学习计划建议
+    summary: str = Field(..., min_length=1, description="岗位总体概述")
+    matched_skills: list[str] = Field(default_factory=list, description="当前已具备技能")
+    missing_skills: list[str] = Field(default_factory=list, description="还缺少的技能")
+    interview_questions: list[str] = Field(default_factory=list, description="可能出现的面试题")
+    study_plan: list[str] = Field(default_factory=list, description="学习计划建议")
     
 
 
