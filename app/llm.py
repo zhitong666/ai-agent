@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from app.models import JobDescription
+from app.prompts import build_jd_parse_messages
 
 load_dotenv()
 
@@ -12,10 +13,6 @@ client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
     base_url=os.getenv("OPENAI_BASE_URL"),
 )
-
-SYSTEM_PROMPT = """你是招聘信息解析器。
-从用户提供的 JD 中提取结构化岗位信息。
-必须调用 save_job_description 工具。"""
 
 SAVE_JOB_DESCRIPTION_TOOL = {
     "type": "function",
@@ -62,10 +59,7 @@ def parse_job_description(jd_text: str) -> JobDescription:
     # `client.chat.completions.create()` 发起一次对话补全请求
     response = client.chat.completions.create( 
         model=os.environ["OPENAI_MODEL"],
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": jd_text},
-        ],
+        messages=build_jd_parse_messages(jd_text),
         tools=[SAVE_JOB_DESCRIPTION_TOOL],
         tool_choice={
             "type": "function",

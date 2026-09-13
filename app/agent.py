@@ -10,11 +10,8 @@ from app.rag import build_retriever
 from app.memory import session_store
 from app.streaming import sse_event
 from app.context import ContextBudget
+from app.prompts import build_analysis_messages, build_chat_messages
 
-
-ANALYSIS_SYSTEM_PROMPT = """你是 AI 岗位分析师。
-根据岗位信息与知识库检索结果，生成岗位分析。
-必须调用 save_job_analysis 工具。"""
 
 ANALYSIS_TOOL = {
     "type": "function",
@@ -58,14 +55,9 @@ def format_context(results: list[dict]) -> str:
     return "\n".join(lines)
 
 def generate_analysis(job, context: str) -> JobAnalysis:
-    user_content = f"岗位信息：\n{job.model_dump_json()}\n\n知识库：\n{context}"
-
     response = client.chat.completions.create(
         model=os.environ["OPENAI_MODEL"],
-        messages=[
-            {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
+        messages=build_analysis_messages(job, context, cot=True),
         tools=[ANALYSIS_TOOL],
         tool_choice={
             "type": "function",
@@ -96,11 +88,6 @@ def analyze_job(jd_text: str, retriever=None) -> JobAnalysis:
     return generate_analysis(job, context) # 调用 DeepSeek 生成分析
 
 
-CHAT_SYSTEM_PROMPT = """你是 AI 岗位咨询助手。
-根据知识库和对话历史回答用户问题，回答要简洁、准确。
-如果使用了知识库内容，请在相关句子末尾用 [chunk_id] 标注来源。
-如果知识库没有相关内容，就明确说明不知道。"""
-
 # 当前问题会带上刚检索到的知识上下文。
 # 这里没有用 function calling，而是让模型直接返回文本，因为聊天场景需要自然多轮回答。
 # 调用结束后，把本轮用户问题和模型回答追加进 memory，下一轮就能看到
@@ -114,12 +101,16 @@ def answer_question(session_id: str, question: str, retriever=None) -> ChatRespo
     context = format_context(results)
 
     # *memory.get_messages() 把历史消息展开，放进当前 messages 列表
-    messages = [
-        {"role": "system", "content": CHAT_SYSTEM_PROMPT},
-        *memory.get_messages(),
-        {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
-    ]
-
+    # messages = [
+    #     {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+    #     *memory.get_messages(),
+    #     {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
+    # ]
+    messages = build_chat_messages(
+        memory.get_messages(),
+        context,
+        question,
+    )
     messages = ContextBudget().fit_messages(messages)
 
     response = client.chat.completions.create(
@@ -146,12 +137,17 @@ def stream_answer_question(
     results = retriever.retrieve(question, top_k=3)
     context = format_context(results)
 
-    messages = [
-        {"role": "system", "content": CHAT_SYSTEM_PROMPT},
-        *memory.get_messages(),
-        {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
-    ]
+    # messages = [
+    #     {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+    #     *memory.get_messages(),
+    #     {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
+    # ]
 
+    messages = build_chat_messages(
+        memory.get_messages(),
+        context,
+        question,
+    )
     messages = ContextBudget().fit_messages(messages)
     
     response = client.chat.completions.create(
