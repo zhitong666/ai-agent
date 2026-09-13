@@ -4,6 +4,8 @@
 # - 聊天问答的 Prompt 构造。
 import json
 
+from app.prompt_library import PromptLibrary, PromptTemplate
+
 JD_PARSE_INSTRUCTIONS = """你是招聘信息解析器。
 从用户提供的 JD 中提取结构化岗位信息。
 必须调用 save_job_description 工具。
@@ -56,11 +58,61 @@ def _format_few_shot_examples(examples: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
+PROMPT_LIBRARY = PromptLibrary()
+
+PROMPT_LIBRARY.register(
+    PromptTemplate(
+        name="jd_parse_system",
+        version="v1",
+        description="JD 解析系统提示",
+        content=(
+            JD_PARSE_INSTRUCTIONS
+            + "\n\n以下示例只用于说明格式，不要照搬示例内容。\n{examples}"
+        ),
+    )
+)
+
+PROMPT_LIBRARY.register(
+    PromptTemplate(
+        name="analysis_system",
+        version="v1",
+        description="岗位分析系统提示",
+        content="{base_instructions}\n\n{cot_instructions}",
+    )
+)
+
+PROMPT_LIBRARY.register(
+    PromptTemplate(
+        name="analysis_user",
+        version="v1",
+        description="岗位分析用户消息",
+        content="岗位信息：\n{job_json}\n\n知识库：\n{context}",
+    )
+)
+
+PROMPT_LIBRARY.register(
+    PromptTemplate(
+        name="chat_system",
+        version="v1",
+        description="聊天系统提示",
+        content=CHAT_INSTRUCTIONS,
+    )
+)
+
+PROMPT_LIBRARY.register(
+    PromptTemplate(
+        name="chat_user",
+        version="v1",
+        description="聊天用户消息",
+        content="知识库：\n{context}\n\n问题：{question}",
+    )
+)
+
+
 def build_jd_parse_messages(jd_text: str) -> list[dict]:
-    system = (
-        JD_PARSE_INSTRUCTIONS
-        + "\n\n以下示例只用于说明格式，不要照搬示例内容。\n"
-        + _format_few_shot_examples(JD_FEW_SHOT_EXAMPLES)
+    system = PROMPT_LIBRARY.render(
+        "jd_parse_system",
+        examples=_format_few_shot_examples(JD_FEW_SHOT_EXAMPLES),
     )
 
     return [
@@ -70,12 +122,20 @@ def build_jd_parse_messages(jd_text: str) -> list[dict]:
 
 
 def build_analysis_messages(job, context: str, cot: bool = True) -> list[dict]:
-    instructions = ANALYSIS_INSTRUCTIONS
-
     if cot:
-        instructions = f"{instructions}\n\n{COT_INSTRUCTIONS}"
+        instructions = PROMPT_LIBRARY.render(
+            "analysis_system",
+            base_instructions=ANALYSIS_INSTRUCTIONS,
+            cot_instructions=COT_INSTRUCTIONS,
+        )
+    else:
+        instructions = ANALYSIS_INSTRUCTIONS
 
-    user_content = f"岗位信息：\n{job.model_dump_json()}\n\n知识库：\n{context}"
+    user_content = PROMPT_LIBRARY.render(
+        "analysis_user",
+        job_json=job.model_dump_json(),
+        context=context,
+    )
 
     return [
         {"role": "system", "content": instructions},
@@ -89,7 +149,17 @@ def build_chat_messages(
     question: str,
 ) -> list[dict]:
     return [
-        {"role": "system", "content": CHAT_INSTRUCTIONS},
+        {
+            "role": "system",
+            "content": PROMPT_LIBRARY.render("chat_system"),
+        },
         *history,
-        {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
+        {
+            "role": "user",
+            "content": PROMPT_LIBRARY.render(
+                "chat_user",
+                context=context,
+                question=question,
+            ),
+        },
     ]
