@@ -1,4 +1,3 @@
-import json 
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -11,6 +10,10 @@ from app.memory import session_store
 from app.streaming import sse_event
 from app.context import ContextBudget
 from app.prompts import build_analysis_messages, build_chat_messages
+from app.structured_output import (
+    build_tool_parameters_from_model,
+    parse_and_validate,
+)
 
 
 ANALYSIS_TOOL = {
@@ -18,24 +21,7 @@ ANALYSIS_TOOL = {
     "function": {
         "name": "save_job_analysis",
         "description": "保存岗位分析结果",
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "summary": {"type": "string"},
-                "matched_skills": {"type": "array", "items": {"type": "string"}},
-                "missing_skills": {"type": "array", "items": {"type": "string"}},
-                "interview_questions": {"type": "array", "items": {"type": "string"}},
-                "study_plan": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": [
-                "summary",
-                "matched_skills",
-                "missing_skills",
-                "interview_questions",
-                "study_plan",
-            ],
-        },
+        "parameters": build_tool_parameters_from_model(JobAnalysis),
     },
 }
 
@@ -70,8 +56,8 @@ def generate_analysis(job, context: str) -> JobAnalysis:
     if not message.tool_calls:
         raise RuntimeError("模型没有返回 tool_calls")
 
-    arguments = json.loads(message.tool_calls[0].function.arguments)
-    return JobAnalysis.model_validate(arguments)
+    arguments = message.tool_calls[0].function.arguments
+    return parse_and_validate(arguments, JobAnalysis)
 
 # 多步流程的入口
 def analyze_job(jd_text: str, retriever=None) -> JobAnalysis:

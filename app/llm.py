@@ -1,4 +1,3 @@
-import json
 import os
 
 from dotenv import load_dotenv
@@ -6,6 +5,10 @@ from openai import OpenAI
 
 from app.models import JobDescription
 from app.prompts import build_jd_parse_messages
+from app.structured_output import (
+    build_tool_parameters_from_model,
+    parse_and_validate,
+)
 
 load_dotenv()
 
@@ -19,39 +22,7 @@ SAVE_JOB_DESCRIPTION_TOOL = {
     "function": {
         "name": "save_job_description",
         "description": "保存解析后的岗位信息",
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "company": {"type": "string"},
-                "title": {"type": "string"},
-                "seniority": {
-                    "type": "string",
-                    "enum": ["junior", "mid", "senior", "staff", "unknown"],
-                },
-                "responsibilities": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-                "requirements": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-                "keywords": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-                "domain": {"type": "string"},
-            },
-            "required": [
-                "company",
-                "title",
-                "seniority",
-                "responsibilities",
-                "requirements",
-                "keywords",
-            ],
-        },
+        "parameters": build_tool_parameters_from_model(JobDescription),
     },
 }
 
@@ -73,5 +44,8 @@ def parse_job_description(jd_text: str) -> JobDescription:
         raise RuntimeError("模型没有返回 tool_calls")
 
     tool_call = message.tool_calls[0]
-    arguments = json.loads(tool_call.function.arguments)
-    return JobDescription.model_validate(arguments)
+    return parse_and_validate(
+        tool_call.function.arguments,
+        JobDescription,
+    )
+    

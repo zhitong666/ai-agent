@@ -3,13 +3,16 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 class JobDescription(BaseModel): 
-    company: str
-    title: str
-    seniority: Literal["junior", "mid", "senior", "staff", "unknown"] = "unknown"
-    responsibilities: list[str] = Field(default_factory=list)
-    requirements: list[str] = Field(default_factory=list)
-    keywords: list[str] = Field(default_factory=list)
-    domain: str = ""
+    company: str = Field(..., description="公司名称")
+    title: str = Field(..., description="岗位名称")
+    seniority: Literal["junior", "mid", "senior", "staff", "unknown"] = Field(
+        "unknown",
+        description="岗位级别",
+    )
+    responsibilities: list[str] = Field(default_factory=list, description="岗位职责")
+    requirements: list[str] = Field(default_factory=list, description="技能要求")
+    keywords: list[str] = Field(default_factory=list, description="检索关键词")
+    domain: str = Field("", description="业务领域")
 
 class JobAnalysis(BaseModel):
     summary: str # 岗位概述
