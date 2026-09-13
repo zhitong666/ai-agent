@@ -9,6 +9,7 @@ from app.models import JobAnalysis, ChatResponse, Source
 from app.rag import build_retriever
 from app.memory import session_store
 from app.streaming import sse_event
+from app.context import ContextBudget
 
 
 ANALYSIS_SYSTEM_PROMPT = """你是 AI 岗位分析师。
@@ -119,6 +120,8 @@ def answer_question(session_id: str, question: str, retriever=None) -> ChatRespo
         {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
     ]
 
+    messages = ContextBudget().fit_messages(messages)
+
     response = client.chat.completions.create(
         model=os.environ["OPENAI_MODEL"],
         messages=messages,
@@ -148,6 +151,8 @@ def stream_answer_question(
         *memory.get_messages(),
         {"role": "user", "content": f"知识库：\n{context}\n\n问题：{question}"},
     ]
+
+    messages = ContextBudget().fit_messages(messages)
     
     response = client.chat.completions.create(
         model=os.environ["OPENAI_MODEL"],
@@ -178,7 +183,7 @@ def stream_answer_question(
 def build_sources(results: list[dict]) -> list[Source]:
     sources = []
 
-    for result in  results:
+    for result in results:
         doc = result["doc"]
         sources.append(
             Source(

@@ -59,7 +59,8 @@ SAVE_JOB_DESCRIPTION_TOOL = {
 }
 
 def parse_job_description(jd_text: str) -> JobDescription:
-    response = client.chat.completions.create(
+    # `client.chat.completions.create()` 发起一次对话补全请求
+    response = client.chat.completions.create( 
         model=os.environ["OPENAI_MODEL"],
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
