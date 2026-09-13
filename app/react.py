@@ -17,6 +17,8 @@ from app.llm import client
 from app.models import ReactResult, ReactStep
 from app.tools import FINISH_TOOL_NAME, build_default_registry
 from app.streaming import sse_event
+from app.model_registry import get_model_name
+
 
 REACT_SYSTEM_PROMPT = """你是 AI 岗位咨询 Agent。
 先用 search_knowledge 或 list_knowledge_titles 了解知识库，再根据结果回答。
@@ -130,7 +132,7 @@ def _call_model(messages, tools, max_retries, timeout):
     for attempt in range(max_retries):
         try:
             return client.chat.completions.create(
-                model=os.environ["OPENAI_MODEL"],
+                model=get_model_name("agent", os.getenv("OPENAI_MODEL")),
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",

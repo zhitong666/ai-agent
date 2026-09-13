@@ -14,6 +14,7 @@ from app.structured_output import (
     build_tool_parameters_from_model,
 )
 from app.function_calling import call_required_function
+from app.model_registry import get_model_name
 
 
 ANALYSIS_TOOL = {
@@ -47,7 +48,7 @@ def generate_analysis(job, context: str) -> JobAnalysis:
         [ANALYSIS_TOOL],
         "save_job_analysis",
         JobAnalysis,
-        model_name=os.environ["OPENAI_MODEL"],
+        model_name=get_model_name("job_analysis", os.getenv("OPENAI_MODEL")),
         max_attempts=3,
     )
 
@@ -92,7 +93,7 @@ def answer_question(session_id: str, question: str, retriever=None) -> ChatRespo
     messages = ContextBudget().fit_messages(messages)
 
     response = client.chat.completions.create(
-        model=os.environ["OPENAI_MODEL"],
+        model=get_model_name("chat", os.getenv("OPENAI_MODEL")),
         messages=messages,
     )
     reply = response.choices[0].message.content
@@ -129,7 +130,7 @@ def stream_answer_question(
     messages = ContextBudget().fit_messages(messages)
     
     response = client.chat.completions.create(
-        model=os.environ["OPENAI_MODEL"],
+        model=get_model_name("chat", os.getenv("OPENAI_MODEL")),
         messages=messages,
         stream=True, # 让模型以增量方式返回
     )

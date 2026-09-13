@@ -9,6 +9,7 @@ from app.structured_output import (
     build_tool_parameters_from_model,
 )
 from app.function_calling import call_required_function
+from app.model_registry import get_model_name
 
 
 load_dotenv()
@@ -34,7 +35,7 @@ def parse_job_description(jd_text: str) -> JobDescription:
         [SAVE_JOB_DESCRIPTION_TOOL],
         "save_job_description",
         JobDescription,
-        model_name=os.environ["OPENAI_MODEL"],
+        model_name=get_model_name("jd_parse", os.getenv("OPENAI_MODEL")),
         max_attempts=3,
     )
     
