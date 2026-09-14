@@ -1,6 +1,38 @@
 import chromadb
 import numpy as np
 
+_METADATA_KEYS = (
+    "doc_id",
+    "title",
+    "chunk_index",
+    "source_uri",
+    "source_type",
+    "section",
+    "language",
+    "char_count",
+    "token_count",
+    "content_hash",
+    "chunking_version",
+    "prev_chunk_id",
+    "next_chunk_id",
+)
+
+
+def _to_chroma_metadata(chunk: dict) -> dict:
+    metadata = {}
+
+    for key in _METADATA_KEYS:
+        value = chunk.get(key)
+        if value is None:
+            continue
+    
+        if isinstance(value, (str, int, float, bool)):
+            metadata[key] = value
+        else:
+            metadata[key] = str(value)
+
+    return metadata
+
 class ChromaStore:
     def __init__(self, persist_dir: str, collection_name: str = "job_knowledge"):
         self.client = chromadb.PersistentClient(path=persist_dir)
@@ -15,14 +47,7 @@ class ChromaStore:
         self.collection.upsert(
             ids=[chunk["chunk_id"] for chunk in chunks],
             documents=[chunk["text"] for chunk in chunks],
-            metadatas=[
-                {
-                    "doc_id": chunk["doc_id"],
-                    "title": chunk["title"],
-                    "chunk_index": chunk["chunk_index"],
-                }
-                for chunk in chunks
-            ],
+            metadatas=[_to_chroma_metadata(chunk) for chunk in chunks],
             embeddings=embeddings.tolist(),
         )
 

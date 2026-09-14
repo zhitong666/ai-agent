@@ -131,9 +131,19 @@ class PersistentHybridRetriever:
 # 先加载文档，再切块，再编码
 # 切换检索入口: 把 build_retriever 的返回值从 RAGRetriever 改成 HybridRetriever
 # 修改 build_retriever，让它返回持久化版本
-def build_retriever(path: Path, strategy: str = "fixed") -> PersistentHybridRetriever:
+def build_retriever(
+    path: Path, 
+    strategy: str = "semantic",
+    chunk_size: int = 120,
+    overlap: int = 24,
+) -> PersistentHybridRetriever:
     documents = load_documents(path)
-    chunks = chunk_documents(documents, strategy=strategy)
+    chunks = chunk_documents(
+        documents, 
+        strategy=strategy,
+        chunk_size=chunk_size,
+        overlap=overlap,
+    )
     model = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
     store = ChromaStore(persist_dir="data/chroma")
     return PersistentHybridRetriever(chunks, model, store)
