@@ -8,7 +8,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from app.chunking import chunk_documents
 from app.bm25 import BM25
-from app.vector_store import ChromaStore
+from app.vector_store import build_vector_store
 from app.embedding_registry import (
     get_embedding_model_name,
     get_embedding_profile,
@@ -110,9 +110,8 @@ class PersistentHybridRetriever:
         self.bm25.fit(self.texts)
 
         chunk_ids = [chunk["chunk_id"] for chunk in chunks]
-        existing_ids = set(self.store.collection.get(ids=chunk_ids)["ids"])
 
-        if existing_ids == set(chunk_ids):
+        if self.store.has_chunks(chunk_ids):
             self.doc_embeddings = self.store.load_embeddings(chunk_ids)
         else:
             self.doc_embeddings = model.encode(self.texts, normalize_embeddings=True)
@@ -163,9 +162,16 @@ def build_retriever(
         model_name,
         profile.dimension,
     )
-    store = ChromaStore(
-        persist_dir="data/chroma",
+    
+    store_type = os.getenv("VECTOR_STORE", "chroma")
+    qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
+
+    store = build_vector_store(
+        store_type=store_type,
         collection_name=collection_name,
+        dimension=profile.dimension,
+        persist_dir="data/chroma",
+        qdrant_url=qdrant_url,
     )
 
     return PersistentHybridRetriever(chunks, model, store) 

@@ -37,6 +37,9 @@ class FakeStore:
         self.upsert_calls = 0
         self.load_calls = 0
 
+    def has_chunks(self, chunk_ids):
+        return set(chunk_ids) == self.collection.ids
+
     def upsert(self, chunks, embeddings):
         self.upsert_calls += 1
 
