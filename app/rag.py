@@ -1,19 +1,27 @@
 import json 
 from pathlib import Path
+import hashlib
+import os
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from app.chunking import chunk_documents
 from app.bm25 import BM25
-
-from sentence_transformers import CrossEncoder
-
 from app.vector_store import ChromaStore
+from app.embedding_registry import (
+    get_embedding_model_name,
+    get_embedding_profile,
+    load_embedding_model,
+)
 
-DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 
-# 打开 JSON 文件, 读取并返回 Python 列表
+def _collection_name_for_model(model_name: str, dimension: int) -> str:
+    digest = hashlib.sha1(model_name.encode("utf-8")).hexdigest()[:8]
+    return f"job_knowledge_{dimension}_{digest}" 
+
+
+# 打开 JSON 文件, 读取并返回 Python 列表build_retriever
 def load_documents(path: Path) -> list[dict]:
     with path.open("r", encoding="utf-8") as file:
         return json.load(file)
@@ -136,6 +144,7 @@ def build_retriever(
     strategy: str = "semantic",
     chunk_size: int = 120,
     overlap: int = 24,
+    embedding_model: str | None = None,
 ) -> PersistentHybridRetriever:
     documents = load_documents(path)
     chunks = chunk_documents(
@@ -144,10 +153,24 @@ def build_retriever(
         chunk_size=chunk_size,
         overlap=overlap,
     )
-    model = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
-    store = ChromaStore(persist_dir="data/chroma")
-    return PersistentHybridRetriever(chunks, model, store)
+    model_name = get_embedding_model_name(
+        "rag_chinese",
+        embedding_model or os.getenv("EMBEDDING_MODEL"),
+    )
+    profile = get_embedding_profile(model_name)
+    model = load_embedding_model(model_name)
+    collection_name = _collection_name_for_model(
+        model_name,
+        profile.dimension,
+    )
+    store = ChromaStore(
+        persist_dir="data/chroma",
+        collection_name=collection_name,
+    )
 
+    return PersistentHybridRetriever(chunks, model, store) 
+
+    
 
 # CrossEncoder 会同时把 query 和候选文本送进模型，比双塔向量模型更准，但更慢，所以只对少量候选做精排。可以用 lru_cache 把模型缓存起来，避免每次请求重新加载。
 def rerank(query: str, results: list[dict], top_k: int = 3) -> list[dict]:
