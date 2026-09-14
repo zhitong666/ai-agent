@@ -5,6 +5,7 @@ import os
 
 import numpy as np
 from sentence_transformers import SentenceTransformer, CrossEncoder
+from functools import lru_cache
 
 from app.chunking import chunk_documents
 from app.bm25 import BM25
@@ -135,6 +136,104 @@ class PersistentHybridRetriever:
         ]
 
 
+class HybridRerankRetriever:
+    def __init__(
+        self,
+        chunks,
+        model,
+        store,
+        alpha: float = 0.5,
+        candidate_top_k: int = 20,
+        reranker=None,
+    ):
+        self.chunks = chunks
+        self.model = model
+        self.store = store
+        self.alpha = alpha
+        self.candidate_top_k = candidate_top_k
+        self.reranker = reranker
+        self.texts = [chunk["text"] for chunk in chunks]
+
+        self._chunks_by_id = {
+            chunk["chunk_id"]: chunk
+            for chunk in chunks
+        }
+        self._index_by_id = {
+            chunk["chunk_id"]: index
+            for index, chunk in enumerate(chunks)
+        }
+
+        self.bm25 = BM25()
+        self.bm25.fit(self.texts)
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 3,
+        filters: dict | None = None,
+    ) -> list[dict]:
+        query_embedding = self.model.encode(
+            [query],
+            normalize_embeddings=True,
+        )[0]
+
+        vector_hits = self.store.query(
+            query_embedding,
+            top_k=self.candidate_top_k,
+            where=filters,
+        )
+        vector_scores = {
+            hit["id"]: float(hit["score"])
+            for hit in vector_hits
+        }
+
+        bm25_scores = np.array(self.bm25.score(query))
+        bm25_top_indices = np.argsort(bm25_scores)[::-1][: self.candidate_top_k]
+        bm25_ids = {
+            self.chunks[index]["chunk_id"]
+            for index in bm25_top_indices
+        }
+
+        union_ids = list(set(vector_scores) | bm25_ids)
+
+        if not union_ids:
+            return []
+
+        vector_values = [
+            vector_scores.get(chunk_id, 0.0)
+            for chunk_id in union_ids
+        ]
+        bm25_values = [
+            bm25_scores[self._index_by_id[chunk_id]]
+            for chunk_id in union_ids
+        ]
+
+        vector_norm = _normalize(np.array(vector_values))
+        bm25_norm = _normalize(np.array(bm25_values))
+
+        combined_scores = (
+            self.alpha * vector_norm
+            + (1 - self.alpha) * bm25_norm
+        )
+
+        candidates = []
+
+        for chunk_id, combined_score in zip(union_ids, combined_scores):
+            candidates.append(
+                {
+                    "doc": self._chunks_by_id[chunk_id],
+                    "score": float(combined_score),
+                }
+            )
+
+        candidates.sort(key=lambda item: item["score"], reverse=True)
+
+        if self.reranker is None:
+            return candidates[:top_k]
+
+        return self.reranker(query, candidates, top_k=top_k)
+
+
 # 先加载文档，再切块，再编码
 # 切换检索入口: 把 build_retriever 的返回值从 RAGRetriever 改成 HybridRetriever
 # 修改 build_retriever，让它返回持久化版本
@@ -144,7 +243,7 @@ def build_retriever(
     chunk_size: int = 120,
     overlap: int = 24,
     embedding_model: str | None = None,
-) -> PersistentHybridRetriever:
+) -> HybridRerankRetriever:
     documents = load_documents(path)
     chunks = chunk_documents(
         documents, 
@@ -174,16 +273,37 @@ def build_retriever(
         qdrant_url=qdrant_url,
     )
 
-    return PersistentHybridRetriever(chunks, model, store) 
+    rerank_enabled = os.getenv("RERANK_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    candidate_top_k = int(os.getenv("CANDIDATE_TOP_K", "20"))
+    alpha = float(os.getenv("HYBRID_ALPHA", "0.5"))
+
+    return HybridRerankRetriever(
+        chunks,
+        model,
+        store,
+        alpha=alpha,
+        candidate_top_k=candidate_top_k,
+        reranker=rerank if rerank_enabled else None,
+    )
 
     
+@lru_cache(maxsize=1)
+def _get_reranker_model():
+    return CrossEncoder("BAAI/bge-reranker-base")
 
-# CrossEncoder 会同时把 query 和候选文本送进模型，比双塔向量模型更准，但更慢，所以只对少量候选做精排。可以用 lru_cache 把模型缓存起来，避免每次请求重新加载。
+
 def rerank(query: str, results: list[dict], top_k: int = 3) -> list[dict]:
+    if not results:
+        return []
+
     pairs = [(query, item["doc"]["text"]) for item in results]
-    model = CrossEncoder("BAAI/bge-reranker-base")
+    model = _get_reranker_model()
     scores = model.predict(pairs)
     order = np.argsort(scores)[::-1][:top_k]
-    return [results[i] for i in order]
+    return [results[index] for index in order]
 
 

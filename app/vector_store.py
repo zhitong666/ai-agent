@@ -141,7 +141,7 @@ class ChromaStore:
         query_embedding: np.ndarray, 
         top_k: int,
         where: dict | None = None,
-    ) -> dict:
+    ) -> list[dict]:
         kwargs = {
             "query_embeddings": [query_embedding.tolist()],
             "n_results": top_k,
@@ -151,7 +151,18 @@ class ChromaStore:
         if where:
             kwargs["where"] = _to_chroma_metadata(where)
 
-        return self.collection.query(**kwargs)
+        raw = self.collection.query(**kwargs)
+
+        ids = raw["ids"][0]
+        distances = raw["distances"][0]
+
+        return [
+            {
+                "id": chunk_id,
+                "score": float(1.0 - distance),
+            }
+            for chunk_id, distance in zip(ids, distances)
+        ]
 
 
 class QdrantStore:
