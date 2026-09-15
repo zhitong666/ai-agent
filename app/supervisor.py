@@ -61,7 +61,7 @@ def validate_decision(
     return None
 
 
-def _max_handoffs() -> int:
+def get_max_handoffs() -> int:
     raw = os.getenv("MAX_HANDOFFS", "3")
 
     try:
@@ -72,7 +72,7 @@ def _max_handoffs() -> int:
     return max(1, min(value, 10))
 
 
-def _decision_from_handoff(
+def decision_from_handoff(
     previous_decision: SupervisorDecision,
     worker_result: WorkerResult,
     handoff: HandoffDecision,
@@ -102,7 +102,7 @@ def run_supervisor(
 ) -> SupervisorResult:
     worker_registry = worker_registry or build_default_worker_registry()
     retriever = retriever or get_retriever()
-    max_handoffs = max_handoffs or _max_handoffs()
+    max_handoffs = max_handoffs or get_max_handoffs()
 
     decision = decide_worker(question, worker_registry)
     current_decision = decision
@@ -148,7 +148,7 @@ def run_supervisor(
         if worker_result.status == "handoff" and worker_result.handoff is not None:
             handoff = worker_result.handoff
             handoffs.append(handoff)
-            current_decision = _decision_from_handoff(
+            current_decision = decision_from_handoff(
                 current_decision,
                 worker_result,
                 handoff,
@@ -189,7 +189,7 @@ def stream_supervisor(
 ) -> Iterator[str]:
     worker_registry = worker_registry or build_default_worker_registry()
     retriever = retriever or get_retriever()
-    max_handoffs = max_handoffs or _max_handoffs()
+    max_handoffs = max_handoffs or get_max_handoffs()
 
     try:
         decision = decide_worker(question, worker_registry)
@@ -232,7 +232,7 @@ def stream_supervisor(
 
             yield sse_event("handoff", handoff.model_dump_json())
 
-            current_decision = _decision_from_handoff(
+            current_decision = decision_from_handoff(
                 current_decision,
                 worker_result,
                 handoff,
