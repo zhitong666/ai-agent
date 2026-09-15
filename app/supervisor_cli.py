@@ -28,6 +28,12 @@ def main() -> None:
     print()
     print(f"Worker 状态：{result.worker_result.status}")
 
+    if result.handoffs:
+        print()
+        print("Handoff 链：")
+        for index, handoff in enumerate(result.handoffs, start=1):
+            print(f"  {index}. {handoff.target_worker}: {handoff.reason}")
+
     if result.worker_result.error:
         print(f"Worker 错误：{result.worker_result.error}")
         raise SystemExit(1)

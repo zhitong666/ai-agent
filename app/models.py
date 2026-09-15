@@ -87,11 +87,19 @@ class SupervisorDecision(BaseModel):
     reason: str = Field("", description="为什么这样路由，便于审计")
 
 
+class HandoffDecision(BaseModel):
+    target_worker: str = Field(..., min_length=1, description="交接给哪个 Worker")
+    goal: str = Field("", description="交接后的目标")
+    context: str = Field("", description="交接给下一个 Worker 的补充上下文")
+    reason: str = Field("", description="为什么要交接")
+
+
 class WorkerResult(BaseModel):
     worker: str
-    status: Literal["completed", "failed"] = "completed"
+    status: Literal["completed", "failed", "handoff"] = "completed"
     answer: str = ""
     error: str = ""
+    handoff: HandoffDecision | None = None
 
 
 class SupervisorResult(BaseModel):
@@ -99,3 +107,4 @@ class SupervisorResult(BaseModel):
     worker_result: WorkerResult
     answer: str = ""
     status: Literal["completed", "failed"] = "completed"
+    handoffs: list[HandoffDecision] = Field(default_factory=list)

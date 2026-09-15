@@ -5,6 +5,21 @@ from app.agent import analyze_job
 from app.models import SupervisorDecision, WorkerResult
 from app.plan_execute import execute_plan, plan_task
 from app.tools import build_default_registry
+from app.models import HandoffDecision, SupervisorDecision, WorkerResult
+
+
+JD_MARKERS = (
+    "招聘",
+    "岗位职责",
+    "任职要求",
+    "要求掌握",
+    "职位描述",
+)
+
+
+def _looks_like_jd(text: str) -> bool:
+    normalized = text.lower()
+    return any(marker in normalized for marker in JD_MARKERS)
 
 
 @dataclass(frozen=True)
@@ -44,6 +59,18 @@ def run_knowledge_worker(
     registry = build_default_registry()
     question = decision.context.strip() or decision.goal
 
+    if _looks_like_jd(question):
+        return WorkerResult(
+            worker="knowledge",
+            status="handoff",
+            handoff=HandoffDecision(
+                target_worker="jd_analysis",
+                goal="解析 JD 并生成岗位分析",
+                context=question,
+                reason="输入包含 JD 特征，应交由 jd_analysis 处理",
+            ),
+        )
+
     try:
         plan = plan_task(question, registry)
         result = execute_plan(
@@ -80,6 +107,18 @@ def run_jd_analysis_worker(
     approve_tool_call=None,
 ) -> WorkerResult:
     jd_text = decision.context.strip() or decision.goal.strip()
+
+    if not _looks_like_jd(jd_text):
+        return WorkerResult(
+            worker="jd_analysis",
+            status="handoff",
+            handoff=HandoffDecision(
+                target_worker="knowledge",
+                goal=decision.goal or jd_text,
+                context=jd_text,
+                reason="输入不是 JD 文本，应交由 knowledge 处理",
+            ),
+        )
 
     if not jd_text:
         return WorkerResult(
