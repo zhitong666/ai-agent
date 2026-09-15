@@ -253,3 +253,47 @@ def build_plan_final_answer_messages(question: str, trace: str) -> list[dict]:
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
+
+SUPERVISOR_INSTRUCTIONS = """你是 Supervisor。只负责判断交给哪个 Worker，不直接回答用户问题。
+只能从可用 Worker 中选择一个。
+如果问题是 JD 文本、岗位分析、职位要求，选择 jd_analysis。
+如果问题是知识库问答、学习路径、技能补充，选择 knowledge。"""
+
+PROMPT_LIBRARY.register(
+    PromptTemplate(
+        name="supervisor_system",
+        version="v1",
+        description="Supervisor 系统提示",
+        content=SUPERVISOR_INSTRUCTIONS + "\n\n可用 Worker：\n{worker_catalog}",
+    )
+)
+
+PROMPT_LIBRARY.register(
+    PromptTemplate(
+        name="supervisor_user",
+        version="v1",
+        description="Supervisor 用户消息",
+        content="用户问题：\n{question}",
+    )
+)
+
+
+def build_supervisor_messages(
+    question: str,
+    worker_catalog: str,
+) -> list[dict]:
+    system = PROMPT_LIBRARY.render(
+        "supervisor_system",
+        worker_catalog=worker_catalog,
+    )
+
+    user = PROMPT_LIBRARY.render(
+        "supervisor_user",
+        question=question,
+    )
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]

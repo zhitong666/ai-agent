@@ -78,3 +78,24 @@ class PlanExecutionResult(BaseModel):
     answer: str = ""
     error: str = ""
     status: Literal["completed", "failed", "stopped"] = "completed"
+
+
+class SupervisorDecision(BaseModel):
+    worker: str = Field(..., min_length=1, description="要交给哪个 Worker")
+    goal: str = Field(..., min_length=1, description="交给 Worker 的具体目标")
+    context: str = Field("", description="Worker 需要的原始上下文，例如 JD 文本")
+    reason: str = Field("", description="为什么这样路由，便于审计")
+
+
+class WorkerResult(BaseModel):
+    worker: str
+    status: Literal["completed", "failed"] = "completed"
+    answer: str = ""
+    error: str = ""
+
+
+class SupervisorResult(BaseModel):
+    decision: SupervisorDecision
+    worker_result: WorkerResult
+    answer: str = ""
+    status: Literal["completed", "failed"] = "completed"

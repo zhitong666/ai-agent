@@ -17,6 +17,7 @@ from app.plan_execute import stream_plan_execute
 from app.react import stream_react_loop
 from app.tools import build_default_registry
 from app.observability import observability_store, trace_stream
+from app.supervisor import stream_supervisor
 
 
 app = FastAPI(title="AI Job Agent", version="0.1.0")
@@ -132,6 +133,24 @@ def agent_plan_stream(request: AgentStreamRequest):
         request.question,
         registry=registry,
         retriever=retriever,
+        approve_tool_call=approve_tool_call,
+    )
+
+    return StreamingResponse(stream, media_type="text/event-stream")
+
+
+@app.post("/agent/supervisor/stream")
+def agent_supervisor_stream(request: AgentStreamRequest):
+    if not request.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+
+    request_id = request.request_id or str(uuid.uuid4())
+
+    def approve_tool_call(tool_name, arguments):
+        return approval_store.wait(request_id)
+
+    stream = stream_supervisor(
+        request.question,
         approve_tool_call=approve_tool_call,
     )
 

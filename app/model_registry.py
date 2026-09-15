@@ -8,6 +8,7 @@ TaskName = Literal[
     "agent",
     "planner",
     "plan_final_answer",
+    "supervisor",
 ]
 LatencyTier = Literal["low", "medium", "high"]
 
@@ -96,6 +97,12 @@ TASK_REQUIREMENTS = {
         "requires_streaming": False,
         "max_latency": "low",
         "capabilities": set(),
+    },
+    "supervisor": {
+        "requires_tools": True,
+        "requires_streaming": False,
+        "max_latency": "low",
+        "capabilities": {"structured"},
     },
 }
 
