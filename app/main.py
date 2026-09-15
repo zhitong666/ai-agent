@@ -5,10 +5,17 @@ import uuid
 
 from app.llm import parse_job_description
 from app.models import JobDescription
-from app.agent import analyze_job, answer_question, stream_answer_question
+from app.agent import (
+    analyze_job,
+    answer_question,
+    get_retriever,
+    stream_answer_question,
+)
 from app.models import JobAnalysis, ChatResponse
 from app.approval import approval_store
+from app.plan_execute import stream_plan_execute
 from app.react import stream_react_loop
+from app.tools import build_default_registry
 from app.observability import observability_store, trace_stream
 
 
@@ -112,3 +119,20 @@ def get_agent_trace(trace_id: str):
     return trace.model_dump()
 
     
+@app.post("/agent/plan/stream")
+def agent_plan_stream(request: AgentStreamRequest):
+    request_id = request.request_id or str(uuid.uuid4())
+    registry = build_default_registry()
+    retriever = get_retriever()
+
+    def approve_tool_call(tool_name, arguments):
+        return approval_store.wait(request_id)
+
+    stream = stream_plan_execute(
+        request.question,
+        registry=registry,
+        retriever=retriever,
+        approve_tool_call=approve_tool_call,
+    )
+
+    return StreamingResponse(stream, media_type="text/event-stream")

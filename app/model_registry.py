@@ -1,7 +1,14 @@
 from dataclasses import dataclass
 from typing import Literal
 
-TaskName = Literal["jd_parse", "job_analysis", "chat", "agent"]
+TaskName = Literal[
+    "jd_parse",
+    "job_analysis",
+    "chat",
+    "agent",
+    "planner",
+    "plan_final_answer",
+]
 LatencyTier = Literal["low", "medium", "high"]
 
 
@@ -75,6 +82,18 @@ TASK_REQUIREMENTS = {
     "agent": {
         "requires_tools": True,
         "requires_streaming": True,
+        "max_latency": "low",
+        "capabilities": set(),
+    },
+    "planner": {
+        "requires_tools": True,
+        "requires_streaming": False,
+        "max_latency": "low",
+        "capabilities": {"structured"},
+    },
+    "plan_final_answer": {
+        "requires_tools": False,
+        "requires_streaming": False,
         "max_latency": "low",
         "capabilities": set(),
     },

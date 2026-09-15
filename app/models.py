@@ -48,3 +48,33 @@ class ReactStep(BaseModel):
 class ReactResult(BaseModel):
     answer: str
     steps: list[ReactStep] = Field(default_factory=list)
+
+
+# 生产含义：PlanStep 是模型输出，PlanStepState 是运行状态。不要把运行状态和模型输出混在一个模型里，否则工具 Schema 会污染，也容易让模型伪造 status。
+class PlanStep(BaseModel):
+    id: str = Field(..., min_length=1, description="步骤 ID，例如 step-1")
+    goal: str = Field(..., min_length=1, description="这一步要完成什么")
+    tool: str = Field(..., min_length=1, description="要调用的工具名")
+    input: str = Field(
+        "",
+        description=(
+            "工具输入；当 tool=search_knowledge 时必填，"
+            "list_knowledge_titles 时留空"
+        ),
+    )
+    depends_on: list[str] = Field(default_factory=list, description="依赖步骤 ID")
+
+class Plan(BaseModel):
+    goal: str = Field(..., min_length=1, description="整体目标")
+    steps: list[PlanStep] = Field(default_factory=list, description="步骤列表")
+
+class PlanStepState(PlanStep):
+    status: Literal["pending", "running", "completed", "failed", "skipped"] = "pending"
+    observation: str = ""
+
+class PlanExecutionResult(BaseModel):
+    plan: Plan
+    steps: list[PlanStepState] = Field(default_factory=list)
+    answer: str = ""
+    error: str = ""
+    status: Literal["completed", "failed", "stopped"] = "completed"

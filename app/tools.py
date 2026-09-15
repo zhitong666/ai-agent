@@ -55,6 +55,9 @@ class ToolRegistry:
     def tool_names(self) -> list[str]:
         return list(self._tools)
 
+    def list_tools(self) -> list[Tool]:
+        return list(self._tools.values())
+
     def to_openai_tools(self) -> list[dict]:
         executable_schemas = []
 
