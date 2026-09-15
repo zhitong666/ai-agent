@@ -2,8 +2,12 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+import os 
 
 from app.agent import format_context
+from app.llm import client
+from app.query_rewriter import multi_query_retrieve
+
 
 FINISH_TOOL_NAME = "finish"
 KNOWLEDGE_BASE_PATH = Path("data/knowledge_base.json")
@@ -69,13 +73,28 @@ class ToolRegistry:
         return executable_schemas + [FINISH_TOOL_SCHEMA]
 
 
-def search_knowledge(arguments: dict, retriever) -> str:
+def search_knowledge(
+    arguments: dict, 
+    retriever,
+    query_rewrite_client=None,
+    enable_rewrite: bool = False,
+) -> str:
     query = arguments.get("query")
 
     if not query:
         raise ValueError("search_knowledge 需要 query 参数")
 
-    results = retriever.retrieve(query, top_k=3)
+    if enable_rewrite and query_rewrite_client is not None:
+        results = multi_query_retrieve(
+            retriever,
+            query,
+            top_k=3,
+            client=query_rewrite_client,
+            enable_rewrite=True,
+        )
+    else:
+        results = retriever.retrieve(query, top_k=3)
+        
     return format_context(results)
 
 
@@ -98,8 +117,24 @@ def apply_job(arguments: dict, retriever) -> str:
     return f"已投递岗位：{company} - {position}"
 
 
-def build_default_registry() -> ToolRegistry:
+def build_default_registry(
+    enable_rewrite: bool | None = None,
+) -> ToolRegistry:
+    if enable_rewrite is None:
+        enable_rewrite = os.getenv(
+            "QUERY_REWRITE_ENABLED",
+            "false",
+        ).lower() in {"1", "true", "yes"}
+
     registry = ToolRegistry()
+
+    def search_knowledge_handler(arguments, retriever):
+        return search_knowledge(
+            arguments,
+            retriever,
+            query_rewrite_client=client,
+            enable_rewrite=enable_rewrite,
+        )
 
     registry.register(
         Tool(
@@ -116,7 +151,7 @@ def build_default_registry() -> ToolRegistry:
                 },
                 "required": ["query"],
             },
-            handler=search_knowledge,
+            handler=search_knowledge_handler,
             input_field="query",
         )
     )
