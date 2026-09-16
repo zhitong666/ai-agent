@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Any
 
 from pydantic import BaseModel, Field
 
@@ -117,3 +117,12 @@ class GraphRunStatus(BaseModel):
     next_nodes: list[str] = Field(default_factory=list)
     result: SupervisorResult | None = None
     error: str = ""
+
+
+class MemoryRecord(BaseModel):
+    memory_id: str
+    namespace: str
+    key: str
+    value: Any
+    created_at: str
+    updated_at: str

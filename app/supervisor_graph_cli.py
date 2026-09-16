@@ -1,12 +1,18 @@
 import argparse
+import json
 import sys
 
 from app.agent import get_retriever
+from app.shared_memory import SharedMemoryStore
 from app.supervisor_graph import (
     get_graph_run,
     resume_graph_run,
     start_graph_run,
 )
+
+
+def build_memory_store():
+    return SharedMemoryStore("data/shared_memory.sqlite")
 
 
 def print_run(run) -> None:
@@ -46,9 +52,67 @@ def main() -> None:
     state_parser = subparsers.add_parser("state")
     state_parser.add_argument("run_id")
 
+    memory_parser = subparsers.add_parser("memory")
+    memory_subparsers = memory_parser.add_subparsers(
+        dest="memory_command",
+        required=True,
+    )
+
+    memory_list_parser = memory_subparsers.add_parser("list")
+    memory_list_parser.add_argument("run_id")
+
+    memory_get_parser = memory_subparsers.add_parser("get")
+    memory_get_parser.add_argument("run_id")
+    memory_get_parser.add_argument("key")
+
+    memory_delete_parser = memory_subparsers.add_parser("delete")
+    memory_delete_parser.add_argument("run_id")
+    memory_delete_parser.add_argument("key")
+
     args = parser.parse_args()
 
+    if args.command == "memory":
+        memory = build_memory_store()
+        namespace = f"run:{args.run_id}"
+
+        if args.memory_command == "list":
+            records = memory.list_namespace(namespace)
+
+            for record in records:
+                value = json.dumps(
+                    record.value,
+                    ensure_ascii=False,
+                )
+                print(f"{record.key}: {value}")
+
+            return
+
+        if args.memory_command == "get":
+            record = memory.get(namespace, args.key)
+
+            if record is None:
+                print("(not found)")
+                raise SystemExit(1)
+
+            print(
+                json.dumps(
+                    record.value,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return
+
+        if args.memory_command == "delete":
+            deleted = memory.delete(namespace, args.key)
+            print(f"deleted={deleted}")
+            return
+
+        parser.print_help()
+        raise SystemExit(1)
+
     retriever = get_retriever()
+    memory = build_memory_store()
 
     if args.command == "start":
         run = start_graph_run(
@@ -56,6 +120,7 @@ def main() -> None:
             retriever=retriever,
             run_id=args.run_id,
             interrupt_before=args.interrupt_before,
+            memory_store=memory,
         )
         print_run(run)
         return
@@ -64,6 +129,7 @@ def main() -> None:
         run = resume_graph_run(
             args.run_id,
             retriever=retriever,
+            memory_store=memory,
         )
         print_run(run)
         return

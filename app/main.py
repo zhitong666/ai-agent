@@ -10,7 +10,7 @@ from app.agent import (
     get_retriever,
     stream_answer_question,
 )
-from app.models import JobDescription, JobAnalysis, ChatResponse, GraphRunStatus
+from app.models import JobDescription, JobAnalysis, ChatResponse, GraphRunStatus, MemoryRecord
 from app.approval import approval_store
 from app.plan_execute import stream_plan_execute
 from app.react import stream_react_loop
@@ -18,9 +18,16 @@ from app.tools import build_default_registry
 from app.observability import observability_store, trace_stream
 from app.supervisor import stream_supervisor
 from app.supervisor_graph import stream_graph_supervisor, start_graph_run, resume_graph_run, get_graph_run
+from app.shared_memory import SharedMemoryStore
+
+
+MEMORY_DB_PATH = "data/shared_memory.sqlite"
+def get_memory_store():
+    return SharedMemoryStore(MEMORY_DB_PATH)
 
 
 app = FastAPI(title="AI Job Agent", version="0.1.0")
+
 
 class ParseRequest(BaseModel):
     text: str = Field(min_length=1)
@@ -201,3 +208,28 @@ def agent_graph_resume(request: GraphResumeRequest):
 @app.get("/agent/graph/state/{run_id}", response_model=GraphRunStatus)
 def agent_graph_state(run_id: str):
     return get_graph_run(run_id)
+
+
+@app.get("/agent/memory/{run_id}", response_model=list[MemoryRecord])
+def agent_memory_list(run_id: str):
+    return get_memory_store().list_namespace(f"run:{run_id}")
+
+
+@app.get("/agent/memory/{run_id}/{key}", response_model=MemoryRecord)
+def agent_memory_get(run_id: str, key: str):
+    record = get_memory_store().get(f"run:{run_id}", key)
+
+    if record is None:
+        raise HTTPException(status_code=404, detail="memory record not found")
+
+    return record
+
+
+@app.delete("/agent/memory/{run_id}/{key}")
+def agent_memory_delete(run_id: str, key: str):
+    deleted = get_memory_store().delete(f"run:{run_id}", key)
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="memory record not found")
+
+    return {"status": "ok"}

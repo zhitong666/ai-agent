@@ -21,6 +21,7 @@ from app.supervisor import (
     get_max_handoffs,
 )
 from app.workers import WorkerRegistry, build_default_worker_registry
+from app.shared_memory import SharedMemoryStore
 
 
 CHECKPOINT_DB_PATH = Path("data/langgraph_checkpoints.sqlite")
@@ -355,6 +356,7 @@ def start_graph_run(
     run_id: str | None = None,
     checkpointer=None,
     interrupt_before: list[str] | None = None, # 如果设置：interrupt_before=["finalize"] 图会在 finalize 节点前暂停。
+    memory_store: SharedMemoryStore | None = None,
 ) -> GraphRunStatus:
     run_id = run_id or uuid.uuid4().hex
     checkpointer = checkpointer or DEFAULT_CHECKPOINTER
@@ -383,7 +385,9 @@ def start_graph_run(
         snapshot.error = str(exc)
         return snapshot
 
-    return _snapshot_from_graph(run_id, graph, config)
+    snapshot = _snapshot_from_graph(run_id, graph, config)
+    _save_run_memory(memory_store, run_id, snapshot)
+    return snapshot
 
 
 def resume_graph_run(
@@ -393,6 +397,7 @@ def resume_graph_run(
     approve_tool_call=None,
     max_handoffs: int | None = None,
     checkpointer=None,
+    memory_store: SharedMemoryStore | None = None,
 ) -> GraphRunStatus:
     checkpointer = checkpointer or DEFAULT_CHECKPOINTER
 
@@ -415,7 +420,9 @@ def resume_graph_run(
         snapshot.error = str(exc)
         return snapshot
 
-    return _snapshot_from_graph(run_id, graph, config)
+    snapshot = _snapshot_from_graph(run_id, graph, config)
+    _save_run_memory(memory_store, run_id, snapshot)
+    return snapshot
 
 
 def get_graph_run(
@@ -435,3 +442,24 @@ def get_graph_run(
     )
 
     return _snapshot_from_graph(run_id, graph, _run_config(run_id))
+
+
+def _save_run_memory(
+    memory_store,
+    run_id: str,
+    snapshot: GraphRunStatus,
+) -> None:
+    if memory_store is None:
+        return
+
+    namespace = f"run:{run_id}"
+
+    memory_store.set(namespace, "state", snapshot.state)
+    memory_store.set(namespace, "status", snapshot.status)
+
+    if snapshot.result is not None:
+        memory_store.set(
+            namespace,
+            "result",
+            snapshot.result.model_dump(),
+        )
