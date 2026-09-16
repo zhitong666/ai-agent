@@ -108,3 +108,12 @@ class SupervisorResult(BaseModel):
     answer: str = ""
     status: Literal["completed", "failed"] = "completed"
     handoffs: list[HandoffDecision] = Field(default_factory=list)
+
+
+class GraphRunStatus(BaseModel):
+    run_id: str
+    status: Literal["running", "completed", "failed", "interrupted"] = "running"
+    state: dict = Field(default_factory=dict)
+    next_nodes: list[str] = Field(default_factory=list)
+    result: SupervisorResult | None = None
+    error: str = ""

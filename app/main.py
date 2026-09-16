@@ -4,21 +4,20 @@ from pydantic import BaseModel, Field
 import uuid
 
 from app.llm import parse_job_description
-from app.models import JobDescription
 from app.agent import (
     analyze_job,
     answer_question,
     get_retriever,
     stream_answer_question,
 )
-from app.models import JobAnalysis, ChatResponse
+from app.models import JobDescription, JobAnalysis, ChatResponse, GraphRunStatus
 from app.approval import approval_store
 from app.plan_execute import stream_plan_execute
 from app.react import stream_react_loop
 from app.tools import build_default_registry
 from app.observability import observability_store, trace_stream
 from app.supervisor import stream_supervisor
-from app.supervisor_graph import stream_graph_supervisor
+from app.supervisor_graph import stream_graph_supervisor, start_graph_run, resume_graph_run, get_graph_run
 
 
 app = FastAPI(title="AI Job Agent", version="0.1.0")
@@ -174,3 +173,31 @@ def agent_graph_stream(request: AgentStreamRequest):
     )
 
     return StreamingResponse(stream, media_type="text/event-stream")
+
+
+class GraphRunRequest(BaseModel):
+    question: str = Field(min_length=1)
+    run_id: str | None = None
+
+
+@app.post("/agent/graph/start", response_model=GraphRunStatus)
+def agent_graph_start(request: GraphRunRequest):
+    return start_graph_run(
+        request.question,
+        run_id=request.run_id,
+        interrupt_before=["finalize"],
+    )
+
+
+class GraphResumeRequest(BaseModel):
+    run_id: str
+
+
+@app.post("/agent/graph/resume", response_model=GraphRunStatus)
+def agent_graph_resume(request: GraphResumeRequest):
+    return resume_graph_run(request.run_id)
+
+
+@app.get("/agent/graph/state/{run_id}", response_model=GraphRunStatus)
+def agent_graph_state(run_id: str):
+    return get_graph_run(run_id)
