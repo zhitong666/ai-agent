@@ -153,3 +153,38 @@ def build_job_knowledge_mcp_tools() -> McpToolCatalog:
     )
 
     return catalog
+
+
+# 给 MCP 的 Tool 和 Resource 共用
+def load_knowledge_document(
+    title: str,
+    path: str | Path | None = None,
+) -> dict | None:
+    title = title.strip()
+
+    if not title:
+        raise ValueError("title must not be empty")
+
+    path = Path(path) if path is not None else DEFAULT_KNOWLEDGE_BASE_PATH
+
+    with path.open("r", encoding="utf-8") as file:
+        documents = json.load(file)
+
+    for document in documents:
+        if document.get("title") == title:
+            return document
+
+    return None
+
+
+# 把知识库标题变成 Resource 返回内容
+def build_knowledge_titles_resource(
+    path: str | Path | None = None,
+) -> str:
+    titles = list_knowledge_titles(path)
+
+    return json.dumps(
+        {"titles": titles},
+        ensure_ascii=False,
+        indent=2,
+    )
