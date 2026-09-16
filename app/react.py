@@ -157,6 +157,8 @@ def run_react_loop(
     approve_tool_call: Callable[[str, dict], bool] | None = None, # 是一个回调函数，返回 True 表示用户批准，False 表示拒绝
     state: AgentState | None = None,
     checkpoint_path: Path | None = None,
+    registry=None,
+    system_prompt=REACT_SYSTEM_PROMPT,
 ) -> ReactResult:
     if state is None:
         state = AgentState(question=question)
@@ -174,11 +176,11 @@ def run_react_loop(
             return ReactResult(answer="我无法处理包含指令注入的内容。", steps=[])
 
         retriever = retriever or get_retriever()
-        registry = build_default_registry()
+        registry = registry or build_default_registry()
         tools = registry.to_openai_tools()
 
         messages = [
-            {"role": "system", "content": REACT_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": question},
         ]
         steps: list[ReactStep] = []
@@ -290,6 +292,8 @@ def stream_react_loop(
     approval_request_id: str | None = None,
     state: AgentState | None = None,
     checkpoint_path: Path | None = None,
+    registry=None,
+    system_prompt=REACT_SYSTEM_PROMPT,
 ) -> Iterator[str]:
     if state is None:
         state = AgentState(question=question)
@@ -309,11 +313,11 @@ def stream_react_loop(
         return 
 
     retriever = retriever or get_retriever()
-    registry = build_default_registry()
+    registry = registry or build_default_registry()
     tools = registry.to_openai_tools()
 
     messages = [
-        {"role": "system", "content": REACT_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": question},
     ]
     steps: list[ReactStep] = []

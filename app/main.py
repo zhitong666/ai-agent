@@ -19,6 +19,7 @@ from app.observability import observability_store, trace_stream
 from app.supervisor import stream_supervisor
 from app.supervisor_graph import stream_graph_supervisor, start_graph_run, resume_graph_run, get_graph_run
 from app.shared_memory import SharedMemoryStore
+from app.mcp_agent import stream_mcp_react_loop
 
 
 MEMORY_DB_PATH = "data/shared_memory.sqlite"
@@ -262,3 +263,30 @@ def agent_memory_delete(
         raise HTTPException(status_code=404, detail="memory record not found")
 
     return {"status": "ok"}
+
+
+@app.post("/agent/mcp/stream")
+def agent_mcp_stream(request: AgentStreamRequest):
+    if not request.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+
+    request_id = request.request_id or str(uuid.uuid4())
+
+    def approve_tool_call(tool_name, arguments):
+        return approval_store.wait(request_id)
+
+    stream = stream_mcp_react_loop(
+        request.question,
+        approve_tool_call=approve_tool_call,
+        approval_request_id=request_id,
+    )
+
+    return StreamingResponse(
+        trace_stream(
+            observability_store,
+            request.question,
+            request_id,
+            stream,
+        ),
+        media_type="text/event-stream",
+    )
