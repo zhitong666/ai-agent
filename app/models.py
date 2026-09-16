@@ -112,6 +112,8 @@ class SupervisorResult(BaseModel):
 
 class GraphRunStatus(BaseModel):
     run_id: str
+    request_id: str | None = None # 用于幂等
+    tenant_id: str = "default" # 用于隔离
     status: Literal["running", "completed", "failed", "interrupted"] = "running"
     state: dict = Field(default_factory=dict)
     next_nodes: list[str] = Field(default_factory=list)

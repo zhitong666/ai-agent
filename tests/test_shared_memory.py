@@ -124,9 +124,9 @@ def test_start_graph_run_writes_run_memory():
             memory_store=memory,
         )
 
-    state = memory.get("run:demo-run-memory", "state")
-    status = memory.get("run:demo-run-memory", "status")
-    result = memory.get("run:demo-run-memory", "result")
+    state = memory.get("tenant:default:run:demo-run-memory", "state")
+    status = memory.get("tenant:default:run:demo-run-memory", "status")
+    result = memory.get("tenant:default:run:demo-run-memory", "result")
 
     assert state is not None
     assert status.value == "completed"

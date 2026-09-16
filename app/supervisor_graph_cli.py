@@ -18,6 +18,8 @@ def build_memory_store():
 def print_run(run) -> None:
     print("=" * 60)
     print(f"run_id={run.run_id}")
+    print(f"request_id={run.request_id}")
+    print(f"tenant_id={run.tenant_id}")
     print(f"status={run.status}")
     print(f"next_nodes={run.next_nodes}")
 
@@ -45,12 +47,26 @@ def main() -> None:
         default=None,
         help="节点名前暂停，例如 finalize",
     )
+    start_parser.add_argument("--request-id", default=None)
+    start_parser.add_argument("--tenant-id", default="default")
+    start_parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=None,
+    )
 
     resume_parser = subparsers.add_parser("resume")
     resume_parser.add_argument("run_id")
+    resume_parser.add_argument("--tenant-id", default="default")
+    resume_parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=None,
+    )
 
     state_parser = subparsers.add_parser("state")
     state_parser.add_argument("run_id")
+    state_parser.add_argument("--tenant-id", default="default")
 
     memory_parser = subparsers.add_parser("memory")
     memory_subparsers = memory_parser.add_subparsers(
@@ -60,20 +76,23 @@ def main() -> None:
 
     memory_list_parser = memory_subparsers.add_parser("list")
     memory_list_parser.add_argument("run_id")
+    memory_list_parser.add_argument("--tenant-id", default="default")
 
     memory_get_parser = memory_subparsers.add_parser("get")
     memory_get_parser.add_argument("run_id")
     memory_get_parser.add_argument("key")
+    memory_get_parser.add_argument("--tenant-id", default="default")
 
     memory_delete_parser = memory_subparsers.add_parser("delete")
     memory_delete_parser.add_argument("run_id")
     memory_delete_parser.add_argument("key")
+    memory_delete_parser.add_argument("--tenant-id", default="default")
 
     args = parser.parse_args()
 
     if args.command == "memory":
         memory = build_memory_store()
-        namespace = f"run:{args.run_id}"
+        namespace = f"tenant:{args.tenant_id}:run:{args.run_id}"
 
         if args.memory_command == "list":
             records = memory.list_namespace(namespace)
@@ -121,6 +140,9 @@ def main() -> None:
             run_id=args.run_id,
             interrupt_before=args.interrupt_before,
             memory_store=memory,
+            request_id=args.request_id,
+            tenant_id=args.tenant_id,
+            timeout_seconds=args.timeout_seconds,
         )
         print_run(run)
         return
@@ -130,6 +152,8 @@ def main() -> None:
             args.run_id,
             retriever=retriever,
             memory_store=memory,
+            tenant_id=args.tenant_id,
+            timeout_seconds=args.timeout_seconds,
         )
         print_run(run)
         return
@@ -138,6 +162,7 @@ def main() -> None:
         run = get_graph_run(
             args.run_id,
             retriever=retriever,
+            tenant_id=args.tenant_id,
         )
         print_run(run)
         return

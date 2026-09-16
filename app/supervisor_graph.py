@@ -5,6 +5,7 @@ from pathlib import Path
 import sqlite3
 from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.sqlite import SqliteSaver
+import concurrent.futures
 
 from app.agent import get_retriever
 from app.models import (
@@ -311,6 +312,8 @@ def _snapshot_from_graph(
     run_id: str,
     graph,
     config: dict,
+    request_id: str | None = None,
+    tenant_id: str = "default",
 ) -> GraphRunStatus:
     snapshot = graph.get_state(config)
     values = snapshot.values or {}
@@ -339,6 +342,8 @@ def _snapshot_from_graph(
 
     return GraphRunStatus(
         run_id=run_id,
+        request_id=request_id,
+        tenant_id=tenant_id,
         status=status,
         state=values,
         next_nodes=next_nodes,
@@ -357,7 +362,26 @@ def start_graph_run(
     checkpointer=None,
     interrupt_before: list[str] | None = None, # 如果设置：interrupt_before=["finalize"] 图会在 finalize 节点前暂停。
     memory_store: SharedMemoryStore | None = None,
+    request_id: str | None = None,
+    tenant_id: str = "default",
+    timeout_seconds: float | None = None,
 ) -> GraphRunStatus:
+    if request_id and memory_store:
+        idempotency_key = _idempotency_namespace(tenant_id)
+        existing = memory_store.get(idempotency_key, request_id)
+
+        if existing and existing.value.get("run_id"):
+            run = get_graph_run(
+                existing.value["run_id"],
+                worker_registry=worker_registry,
+                retriever=retriever,
+                approve_tool_call=approve_tool_call,
+                checkpointer=checkpointer,
+                tenant_id=tenant_id,
+            )
+            run.request_id = request_id
+            return run
+
     run_id = run_id or uuid.uuid4().hex
     checkpointer = checkpointer or DEFAULT_CHECKPOINTER
 
@@ -378,15 +402,53 @@ def start_graph_run(
     }
 
     try:
-        graph.invoke(state, config=config)
+        _invoke_with_timeout(
+            graph,
+            state,
+            config,
+            timeout_seconds,
+        )
+    except TimeoutError as exc:
+        snapshot = GraphRunStatus(
+            run_id=run_id,
+            request_id=request_id,
+            tenant_id=tenant_id,
+            status="failed",
+            state=state,
+            error=str(exc),
+        )
+        _save_run_memory(memory_store, tenant_id, run_id, snapshot)
+        return snapshot
     except Exception as exc:
-        snapshot = _snapshot_from_graph(run_id, graph, config)
+        snapshot = _snapshot_from_graph(
+            run_id,
+            graph,
+            config,
+            request_id=request_id,
+            tenant_id=tenant_id,
+        )
         snapshot.status = "failed"
         snapshot.error = str(exc)
+        _save_run_memory(memory_store, tenant_id, run_id, snapshot)
         return snapshot
+    
+    snapshot = _snapshot_from_graph(
+        run_id,
+        graph,
+        config,
+        request_id=request_id,
+        tenant_id=tenant_id,
+    )
 
-    snapshot = _snapshot_from_graph(run_id, graph, config)
-    _save_run_memory(memory_store, run_id, snapshot)
+    _save_run_memory(memory_store, tenant_id, run_id, snapshot)
+
+    if request_id and memory_store:
+        memory_store.set(
+            _idempotency_namespace(tenant_id),
+            request_id,
+            {"run_id": run_id},
+        )
+
     return snapshot
 
 
@@ -398,6 +460,8 @@ def resume_graph_run(
     max_handoffs: int | None = None,
     checkpointer=None,
     memory_store: SharedMemoryStore | None = None,
+    tenant_id: str = "default",
+    timeout_seconds: float | None = None,
 ) -> GraphRunStatus:
     checkpointer = checkpointer or DEFAULT_CHECKPOINTER
 
@@ -413,15 +477,31 @@ def resume_graph_run(
     config = _run_config(run_id)
 
     try:
-        graph.invoke(None, config=config) # 这里的 None 表示不是重新输入，而是从 checkpointer 保存的位置继续
+        _invoke_with_timeout(
+            graph,
+            None,
+            config,
+            timeout_seconds,
+        ) # 这里的 None 表示不是重新输入，而是从 checkpointer 保存的位置继续
     except Exception as exc:
-        snapshot = _snapshot_from_graph(run_id, graph, config)
+        snapshot = _snapshot_from_graph(
+            run_id,
+            graph,
+            config,
+            tenant_id=tenant_id,
+        )
         snapshot.status = "failed"
         snapshot.error = str(exc)
+        _save_run_memory(memory_store, tenant_id, run_id, snapshot)
         return snapshot
 
-    snapshot = _snapshot_from_graph(run_id, graph, config)
-    _save_run_memory(memory_store, run_id, snapshot)
+    snapshot = _snapshot_from_graph(
+        run_id,
+        graph,
+        config,
+        tenant_id=tenant_id,
+    )
+    _save_run_memory(memory_store, tenant_id, run_id, snapshot)
     return snapshot
 
 
@@ -431,6 +511,7 @@ def get_graph_run(
     retriever=None,
     approve_tool_call=None,
     checkpointer=None,
+    tenant_id: str = "default",
 ) -> GraphRunStatus:
     checkpointer = checkpointer or DEFAULT_CHECKPOINTER
 
@@ -441,18 +522,60 @@ def get_graph_run(
         checkpointer=checkpointer,
     )
 
-    return _snapshot_from_graph(run_id, graph, _run_config(run_id))
+    return _snapshot_from_graph(
+        run_id, 
+        graph, 
+        _run_config(run_id),
+        tenant_id=tenant_id,
+    )
+
+
+def _invoke_with_timeout(
+    graph,
+    input_state,
+    config,
+    timeout_seconds: float | None,
+):
+    if timeout_seconds is None:
+        return graph.invoke(input_state, config=config)
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    try:
+        future = executor.submit(
+            graph.invoke,
+            input_state,
+            config=config,
+        )
+
+        try:
+            return future.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError as exc:
+            raise TimeoutError(
+                f"graph run timeout after {timeout_seconds}s"
+            ) from exc
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _run_namespace(tenant_id: str, run_id: str) -> str:
+    return f"tenant:{tenant_id}:run:{run_id}"
+
+
+def _idempotency_namespace(tenant_id: str) -> str:
+    return f"tenant:{tenant_id}:idempotency"
 
 
 def _save_run_memory(
     memory_store,
+    tenant_id: str,
     run_id: str,
     snapshot: GraphRunStatus,
 ) -> None:
     if memory_store is None:
         return
 
-    namespace = f"run:{run_id}"
+    namespace = _run_namespace(tenant_id, run_id)
 
     memory_store.set(namespace, "state", snapshot.state)
     memory_store.set(namespace, "status", snapshot.status)

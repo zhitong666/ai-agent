@@ -185,6 +185,9 @@ def agent_graph_stream(request: AgentStreamRequest):
 class GraphRunRequest(BaseModel):
     question: str = Field(min_length=1)
     run_id: str | None = None
+    request_id: str | None = None
+    tenant_id: str = "default"
+    timeout_seconds: float | None = None
 
 
 @app.post("/agent/graph/start", response_model=GraphRunStatus)
@@ -192,32 +195,53 @@ def agent_graph_start(request: GraphRunRequest):
     return start_graph_run(
         request.question,
         run_id=request.run_id,
+        request_id=request.request_id,
+        tenant_id=request.tenant_id,
+        timeout_seconds=request.timeout_seconds,
         interrupt_before=["finalize"],
     )
 
 
 class GraphResumeRequest(BaseModel):
     run_id: str
+    tenant_id: str = "default"
+    timeout_seconds: float | None = None
 
 
 @app.post("/agent/graph/resume", response_model=GraphRunStatus)
 def agent_graph_resume(request: GraphResumeRequest):
-    return resume_graph_run(request.run_id)
+    return resume_graph_run(
+        request.run_id,
+        tenant_id=request.tenant_id,
+        timeout_seconds=request.timeout_seconds,
+    )
 
 
 @app.get("/agent/graph/state/{run_id}", response_model=GraphRunStatus)
-def agent_graph_state(run_id: str):
-    return get_graph_run(run_id)
+def agent_graph_state(
+    run_id: str,
+    tenant_id: str = "default",
+):
+    return get_graph_run(run_id, tenant_id=tenant_id)
 
 
 @app.get("/agent/memory/{run_id}", response_model=list[MemoryRecord])
-def agent_memory_list(run_id: str):
-    return get_memory_store().list_namespace(f"run:{run_id}")
+def agent_memory_list(
+    run_id: str,
+    tenant_id: str = "default",
+):
+    namespace = f"tenant:{tenant_id}:run:{run_id}"
+    return get_memory_store().list_namespace(namespace)
 
 
 @app.get("/agent/memory/{run_id}/{key}", response_model=MemoryRecord)
-def agent_memory_get(run_id: str, key: str):
-    record = get_memory_store().get(f"run:{run_id}", key)
+def agent_memory_get(
+    run_id: str,
+    key: str,
+    tenant_id: str = "default",
+):
+    namespace = f"tenant:{tenant_id}:run:{run_id}"
+    record = get_memory_store().get(namespace, key)
 
     if record is None:
         raise HTTPException(status_code=404, detail="memory record not found")
@@ -226,8 +250,13 @@ def agent_memory_get(run_id: str, key: str):
 
 
 @app.delete("/agent/memory/{run_id}/{key}")
-def agent_memory_delete(run_id: str, key: str):
-    deleted = get_memory_store().delete(f"run:{run_id}", key)
+def agent_memory_delete(
+    run_id: str,
+    key: str,
+    tenant_id: str = "default",    
+):
+    namespace = f"tenant:{tenant_id}:run:{run_id}"
+    deleted = get_memory_store().delete(namespace, key)
 
     if not deleted:
         raise HTTPException(status_code=404, detail="memory record not found")
