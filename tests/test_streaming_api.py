@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -87,6 +87,8 @@ def test_chat_stream_endpoint_returns_sse():
         yield streaming.sse_event("done", "")
 
     app.state.session_store = MagicMock()
+    app.state.rate_limiter = MagicMock()
+    app.state.rate_limiter.allow = AsyncMock(return_value=True)
 
     with patch(
         "app.main.stream_answer_question_async",
@@ -105,6 +107,9 @@ def test_chat_stream_endpoint_returns_sse():
 
 
 def test_chat_stream_rejects_empty_question():
+    app.state.rate_limiter = MagicMock()
+    app.state.rate_limiter.allow = AsyncMock(return_value=False)
+
     response = client.post(
         "/chat/stream",
         json={"session_id": "s1", "question": ""},

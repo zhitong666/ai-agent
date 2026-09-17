@@ -27,6 +27,9 @@ from app.plan_execute import stream_plan_execute
 from app.postgres import create_postgres_pool
 from app.postgres_session_store import PostgresSessionStore
 from app.react import stream_react_loop
+from app.redis_client import create_redis_client
+from app.redis_rate_limiter import RedisRateLimiter
+from app.redis_session_cache import RedisSessionCache
 from app.shared_memory import SharedMemoryStore
 from app.supervisor import stream_supervisor
 from app.supervisor_graph import (
@@ -49,13 +52,21 @@ async def lifespan(app):
     app.state.async_client = create_async_client()
     app.state.llm_semaphore = create_llm_semaphore()
     app.state.postgres_pool = await create_postgres_pool()
-    app.state.session_store = PostgresSessionStore(app.state.postgres_pool)
+    app.state.redis = create_redis_client()
+    app.state.rate_limiter = RedisRateLimiter(app.state.redis)
+
+    postgres_session_store = PostgresSessionStore(app.state.postgres_pool)
+    app.state.session_store = RedisSessionCache(
+        app.state.redis,
+        postgres_session_store,
+    )
 
     try:
         yield
     finally:
         await app.state.async_client.close()
         await app.state.postgres_pool.close()
+        await app.state.redis.aclose()
 
 
 app = FastAPI(
@@ -85,6 +96,16 @@ async def health_db() -> dict[str, str]:
             raise RuntimeError("database returned no result")
     except Exception as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
+
+    return {"status": "ok"}
+
+
+@app.get("/health/redis")
+async def health_redis() -> dict[str, str]:
+    try:
+        await app.state.redis.ping()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="redis unavailable") from exc
 
     return {"status": "ok"}
 
@@ -124,6 +145,16 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
+    rate_key = f"chat:rate:{request.session_id}"
+    allowed = await app.state.rate_limiter.allow(
+        rate_key,
+        limit=10,
+        window_seconds=60,
+    )
+
+    if not allowed:
+        raise HTTPException(status_code=429, detail="too many requests")
+
     return await answer_question_async(
         app.state.async_client,
         request.session_id,
@@ -137,6 +168,16 @@ async def chat(request: ChatRequest) -> ChatResponse:
 async def chat_stream(request: ChatRequest):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+
+    rate_key = f"chat:rate:{request.session_id}"
+    allowed = await app.state.rate_limiter.allow(
+        rate_key,
+        limit=10,
+        window_seconds=60,
+    )
+
+    if not allowed:
+        raise HTTPException(status_code=429, detail="too many requests")
 
     return StreamingResponse(
         stream_answer_question_async(

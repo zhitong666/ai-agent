@@ -57,6 +57,8 @@ def test_async_chat_endpoint_returns_patched_response():
         app.state.async_client = MagicMock()
         app.state.llm_semaphore = asyncio.Semaphore()
         app.state.session_store = MagicMock()
+        app.state.rate_limiter = MagicMock()
+        app.state.rate_limiter.allow = AsyncMock(return_value=True)
 
         transport = httpx.ASGITransport(app=app)
 
@@ -113,6 +115,8 @@ def test_async_chat_requests_overlap():
         app.state.async_client = MagicMock()
         app.state.llm_semaphore = asyncio.Semaphore()
         app.state.session_store = MagicMock()
+        app.state.rate_limiter = MagicMock()
+        app.state.rate_limiter.allow = AsyncMock(return_value=True)
 
         transport = httpx.ASGITransport(app=app)
 
@@ -157,6 +161,8 @@ def test_async_chat_stream_endpoint_consumes_async_generator():
         app.state.async_client = MagicMock()
         app.state.llm_semaphore = asyncio.Semaphore()
         app.state.session_store = MagicMock()
+        app.state.rate_limiter = MagicMock()
+        app.state.rate_limiter.allow = AsyncMock(return_value=True)
         
         transport = httpx.ASGITransport(app=app)
 

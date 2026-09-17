@@ -19,6 +19,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
     "qdrant-client>=1.19.0",
+    "redis>=6.0.0",
     "sentence-transformers>=6.0.0",
     "tiktoken>=0.14.0",
     "uvicorn[standard]>=0.52.3",
