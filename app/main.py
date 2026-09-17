@@ -14,6 +14,7 @@ from app.async_agent import (
     stream_answer_question_async,
 )
 from app.async_llm import create_async_client, create_llm_semaphore
+from app.job_store import JobStore
 from app.mcp_agent import stream_mcp_react_loop
 from app.models import (
     ChatResponse,
@@ -26,6 +27,7 @@ from app.observability import observability_store, trace_stream
 from app.plan_execute import stream_plan_execute
 from app.postgres import create_postgres_pool
 from app.postgres_session_store import PostgresSessionStore
+from app.queue import create_queue
 from app.react import stream_react_loop
 from app.redis_client import create_redis_client
 from app.redis_rate_limiter import RedisRateLimiter
@@ -53,7 +55,9 @@ async def lifespan(app):
     app.state.llm_semaphore = create_llm_semaphore()
     app.state.postgres_pool = await create_postgres_pool()
     app.state.redis = create_redis_client()
+    app.state.queue = await create_queue()
     app.state.rate_limiter = RedisRateLimiter(app.state.redis)
+    app.state.job_store = JobStore(app.state.redis)
 
     postgres_session_store = PostgresSessionStore(app.state.postgres_pool)
     app.state.session_store = RedisSessionCache(
@@ -66,6 +70,7 @@ async def lifespan(app):
     finally:
         await app.state.async_client.close()
         await app.state.postgres_pool.close()
+        await app.state.queue.aclose()
         await app.state.redis.aclose()
 
 
@@ -106,6 +111,16 @@ async def health_redis() -> dict[str, str]:
         await app.state.redis.ping()
     except Exception as exc:
         raise HTTPException(status_code=503, detail="redis unavailable") from exc
+
+    return {"status": "ok"}
+
+
+@app.get("/health/queue")
+async def health_queue() -> dict[str, str]:
+    try:
+        await app.state.queue.ping()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="queue unavailable") from exc
 
     return {"status": "ok"}
 
@@ -189,6 +204,68 @@ async def chat_stream(request: ChatRequest):
         ),
         media_type="text/event-stream",
     )
+
+
+class AnalyzeJobRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    type: str | None = None
+    payload: dict | None = None
+    result: dict | None = None
+    error: str | None = None
+
+
+@app.post(
+    "/jobs/analyze",
+    response_model=JobStatusResponse,
+    status_code=202,
+)
+async def create_analyze_job(request: AnalyzeJobRequest):
+    if not request.text.strip():
+        raise HTTPException(status_code=422, detail="text must not be empty")
+
+    job_id = str(uuid.uuid4())
+
+    await app.state.job_store.create(
+        job_id,
+        "analyze_job",
+        {"text": request.text},
+    )
+
+    try:
+        await app.state.queue.enqueue_job(
+            "analyze_job_task",
+            request.text,
+            job_id,
+            _job_id=job_id,
+        )
+    except Exception as exc:
+        await app.state.job_store.fail(job_id, str(exc))
+        raise HTTPException(status_code=503, detail="queue unavailable") from exc
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "type": "analyze_job",
+        "payload": {"text": request.text},
+    }
+
+
+@app.get(
+    "/jobs/{job_id}",
+    response_model=JobStatusResponse,
+)
+async def get_job_status(job_id: str):
+    job = await app.state.job_store.get(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    return job
 
 
 class AgentStreamRequest(BaseModel):
