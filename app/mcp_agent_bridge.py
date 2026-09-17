@@ -10,6 +10,7 @@ from app.tool_policy import (
     build_default_tool_permission_policy,
 )
 from app.prompt_guard import guard_tool_arguments
+from app.sensitive_data import mask_value
 
 
 def _serialize_result(result) -> str:
@@ -45,6 +46,7 @@ def _build_remote_handler(
             )
 
         result = executor(tool_name, arguments)
+        result = mask_value(result)
 
         if isinstance(result, str):
             return result

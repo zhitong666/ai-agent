@@ -2,8 +2,9 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-
 from pydantic import BaseModel, Field
+
+from app.sensitive_data import mask_value
 
 
 def _now() -> str:
@@ -30,7 +31,7 @@ class ObservabilityStore:
         trace_id = trace_id or str(uuid.uuid4())
         self._traces[trace_id] = AgentTrace(
             trace_id=trace_id,
-            question=question,
+            question=mask_value(question),
         )
         return trace_id
     
@@ -43,7 +44,7 @@ class ObservabilityStore:
             TraceEvent(
                 event_type=event_type,
                 timestamp=_now(),
-                data=data,
+                data=mask_value(data),
             )
         )
 
