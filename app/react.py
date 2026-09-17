@@ -9,7 +9,6 @@ from openai import APIConnectionError, APITimeoutError, RateLimitError
 from app.agent import get_retriever
 from app.agent_state import AgentState, save_checkpoint
 from app.guards import (
-    contains_prompt_injection,
     validate_final_answer,
     validate_tool_arguments,
 )
@@ -18,6 +17,7 @@ from app.models import ReactResult, ReactStep
 from app.tools import FINISH_TOOL_NAME, build_default_registry
 from app.streaming import sse_event
 from app.model_registry import get_model_name
+from app.prompt_guard import guard_user_input
 
 
 REACT_SYSTEM_PROMPT = """你是 AI 岗位咨询 Agent。
@@ -167,13 +167,17 @@ def run_react_loop(
     state.mark_running()
 
     try:
-        if contains_prompt_injection(question):
+        input_guard = guard_user_input(question)
+
+        if not input_guard.safe:
             state.mark_finished("我无法处理包含指令注入的内容。")
 
             if checkpoint_path:
                 save_checkpoint(state, checkpoint_path)
 
             return ReactResult(answer="我无法处理包含指令注入的内容。", steps=[])
+
+        question = input_guard.text
 
         retriever = retriever or get_retriever()
         registry = registry or build_default_registry()
@@ -301,7 +305,9 @@ def stream_react_loop(
     state.question = question
     state.mark_running()
 
-    if contains_prompt_injection(question):
+    input_guard = guard_user_input(question)
+
+    if not input_guard.safe:
         answer = "我无法处理包含指令注入的内容。"
         state.mark_finished(answer)
 
@@ -310,7 +316,9 @@ def stream_react_loop(
 
         yield sse_event("answer", answer)
         yield sse_event("done", "")
-        return 
+        return
+
+    question = input_guard.text
 
     retriever = retriever or get_retriever()
     registry = registry or build_default_registry()
