@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 COPY app ./app
+COPY migrations ./migrations
 COPY data ./data
 
 RUN pip install --no-cache-dir uv \

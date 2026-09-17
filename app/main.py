@@ -24,6 +24,8 @@ from app.models import (
 )
 from app.observability import observability_store, trace_stream
 from app.plan_execute import stream_plan_execute
+from app.postgres import create_postgres_pool
+from app.postgres_session_store import PostgresSessionStore
 from app.react import stream_react_loop
 from app.shared_memory import SharedMemoryStore
 from app.supervisor import stream_supervisor
@@ -46,11 +48,14 @@ def get_memory_store():
 async def lifespan(app):
     app.state.async_client = create_async_client()
     app.state.llm_semaphore = create_llm_semaphore()
+    app.state.postgres_pool = await create_postgres_pool()
+    app.state.session_store = PostgresSessionStore(app.state.postgres_pool)
 
     try:
         yield
     finally:
         await app.state.async_client.close()
+        await app.state.postgres_pool.close()
 
 
 app = FastAPI(
@@ -66,6 +71,21 @@ class ParseRequest(BaseModel):
 
 @app.get("/health")
 async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/health/db")
+async def health_db() -> dict[str, str]:
+    try:
+        async with app.state.postgres_pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute("SELECT 1")
+            row = await cur.fetchone()
+
+        if row is None:
+            raise RuntimeError("database returned no result")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
+
     return {"status": "ok"}
 
 
@@ -109,6 +129,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
         request.session_id,
         request.question,
         semaphore=app.state.llm_semaphore,
+        session_store=app.state.session_store,
     )
 
 
@@ -123,6 +144,7 @@ async def chat_stream(request: ChatRequest):
             request.session_id,
             request.question,
             semaphore=app.state.llm_semaphore,
+            session_store=app.state.session_store,
         ),
         media_type="text/event-stream",
     )

@@ -50,11 +50,13 @@ def test_async_chat_endpoint_returns_patched_response():
             question,
             retriever=None,
             semaphore=None,
+            session_store=None,
         ):
             return {"reply": "async ok", "sources": []}
 
         app.state.async_client = MagicMock()
         app.state.llm_semaphore = asyncio.Semaphore()
+        app.state.session_store = MagicMock()
 
         transport = httpx.ASGITransport(app=app)
 
@@ -91,6 +93,7 @@ def test_async_chat_requests_overlap():
             question,
             retriever=None,
             semaphore=None,
+            session_store=None,
         ):
             nonlocal active, peak
 
@@ -109,6 +112,7 @@ def test_async_chat_requests_overlap():
 
         app.state.async_client = MagicMock()
         app.state.llm_semaphore = asyncio.Semaphore()
+        app.state.session_store = MagicMock()
 
         transport = httpx.ASGITransport(app=app)
 
@@ -145,12 +149,14 @@ def test_async_chat_stream_endpoint_consumes_async_generator():
             question,
             retriever=None,
             semaphore=None,
+            session_store=None,
         ):
             yield "event: chunk\ndata: 你好\n\n"
             yield "event: done\ndata: \n\n"
 
         app.state.async_client = MagicMock()
         app.state.llm_semaphore = asyncio.Semaphore()
+        app.state.session_store = MagicMock()
         
         transport = httpx.ASGITransport(app=app)
 

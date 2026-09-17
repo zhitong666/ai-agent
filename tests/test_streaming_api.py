@@ -81,9 +81,12 @@ def test_chat_stream_endpoint_returns_sse():
         question,
         retriever=None,
         semaphore=None,
+        session_store=None,
     ):
         yield streaming.sse_event("chunk", "你好")
         yield streaming.sse_event("done", "")
+
+    app.state.session_store = MagicMock()
 
     with patch(
         "app.main.stream_answer_question_async",
