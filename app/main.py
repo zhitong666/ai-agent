@@ -1,78 +1,130 @@
+import uuid
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-import uuid
 
-from app.llm import parse_job_description
-from app.agent import (
-    analyze_job,
-    answer_question,
-    get_retriever,
-    stream_answer_question,
-)
-from app.models import JobDescription, JobAnalysis, ChatResponse, GraphRunStatus, MemoryRecord
+from app.agent import get_retriever
 from app.approval import approval_store
+from app.async_agent import (
+    analyze_job_async,
+    answer_question_async,
+    parse_job_description_async,
+    stream_answer_question_async,
+)
+from app.async_llm import create_async_client, create_llm_semaphore
+from app.mcp_agent import stream_mcp_react_loop
+from app.models import (
+    ChatResponse,
+    GraphRunStatus,
+    JobAnalysis,
+    JobDescription,
+    MemoryRecord,
+)
+from app.observability import observability_store, trace_stream
 from app.plan_execute import stream_plan_execute
 from app.react import stream_react_loop
-from app.tools import build_default_registry
-from app.observability import observability_store, trace_stream
-from app.supervisor import stream_supervisor
-from app.supervisor_graph import stream_graph_supervisor, start_graph_run, resume_graph_run, get_graph_run
 from app.shared_memory import SharedMemoryStore
-from app.mcp_agent import stream_mcp_react_loop
-
+from app.supervisor import stream_supervisor
+from app.supervisor_graph import (
+    get_graph_run,
+    resume_graph_run,
+    start_graph_run,
+    stream_graph_supervisor,
+)
+from app.tools import build_default_registry
 
 MEMORY_DB_PATH = "data/shared_memory.sqlite"
+
+
 def get_memory_store():
     return SharedMemoryStore(MEMORY_DB_PATH)
 
 
-app = FastAPI(title="AI Job Agent", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app):
+    app.state.async_client = create_async_client()
+    app.state.llm_semaphore = create_llm_semaphore()
+
+    try:
+        yield
+    finally:
+        await app.state.async_client.close()
+
+
+app = FastAPI(
+    title="AI Job Agent",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 
 class ParseRequest(BaseModel):
     text: str = Field(min_length=1)
 
+
 @app.get("/health")
-def health() -> dict[str, str]:
+async def health() -> dict[str, str]:
     return {"status": "ok"}
 
+
 @app.post("/jd/parse", response_model=JobDescription)
-def parse_jd(request: ParseRequest) -> JobDescription:
+async def parse_jd(request: ParseRequest) -> JobDescription:
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
 
-    return parse_job_description(request.text)
+    return await parse_job_description_async(
+        app.state.async_client,
+        request.text,
+        semaphore=app.state.llm_semaphore,
+    )
 
 
 class AnalyzeRequest(BaseModel):
     text: str = Field(min_length=1)
 
+
 @app.post("/jd/analyze", response_model=JobAnalysis)
-def analyze_jd(request: AnalyzeRequest) -> JobAnalysis:
+async def analyze_jd(request: AnalyzeRequest) -> JobAnalysis:
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
-    
-    return analyze_job(request.text)
+
+    return await analyze_job_async(
+        app.state.async_client,
+        request.text,
+        semaphore=app.state.llm_semaphore,
+    )
 
 
 class ChatRequest(BaseModel):
     session_id: str
     question: str = Field(min_length=1)
 
+
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
-    return answer_question(request.session_id, request.question)
+async def chat(request: ChatRequest) -> ChatResponse:
+    return await answer_question_async(
+        app.state.async_client,
+        request.session_id,
+        request.question,
+        semaphore=app.state.llm_semaphore,
+    )
+
 
 @app.post("/chat/stream")
-def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
 
-    # StreamingResponse 接收一个生成器，边生成边返回
     return StreamingResponse(
-        stream_answer_question(request.session_id, request.question),
-        media_type="text/event-stream" # 告诉浏览器这是 SSE 流
+        stream_answer_question_async(
+            app.state.async_client,
+            request.session_id,
+            request.question,
+            semaphore=app.state.llm_semaphore,
+        ),
+        media_type="text/event-stream",
     )
 
 
@@ -84,6 +136,7 @@ class AgentStreamRequest(BaseModel):
 class ApprovalRequest(BaseModel):
     request_id: str
     approved: bool
+
 
 @app.post("/agent/stream")
 def agent_stream(request: AgentStreamRequest):
@@ -108,7 +161,7 @@ def agent_stream(request: AgentStreamRequest):
             request_id,
             stream,
         ),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
     )
 
 
@@ -127,7 +180,7 @@ def get_agent_trace(trace_id: str):
 
     return trace.model_dump()
 
-    
+
 @app.post("/agent/plan/stream")
 def agent_plan_stream(request: AgentStreamRequest):
     request_id = request.request_id or str(uuid.uuid4())
@@ -254,7 +307,7 @@ def agent_memory_get(
 def agent_memory_delete(
     run_id: str,
     key: str,
-    tenant_id: str = "default",    
+    tenant_id: str = "default",
 ):
     namespace = f"tenant:{tenant_id}:run:{run_id}"
     deleted = get_memory_store().delete(namespace, key)

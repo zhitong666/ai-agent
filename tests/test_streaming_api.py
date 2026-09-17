@@ -75,11 +75,20 @@ def test_stream_answer_question_yields_chunks_then_done():
 
 
 def test_chat_stream_endpoint_returns_sse():
-    def fake_stream(session_id, question):
+    async def fake_stream(
+        client,
+        session_id,
+        question,
+        retriever=None,
+        semaphore=None,
+    ):
         yield streaming.sse_event("chunk", "你好")
         yield streaming.sse_event("done", "")
 
-    with patch("app.main.stream_answer_question", side_effect=fake_stream):
+    with patch(
+        "app.main.stream_answer_question_async",
+        side_effect=fake_stream,
+    ):
         response = client.post(
             "/chat/stream",
             json={"session_id": "s1", "question": "你好"},
