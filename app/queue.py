@@ -1,13 +1,11 @@
-import os
-
 from arq import create_pool
 from arq.connections import RedisSettings
 
+from app.config import get_settings
+
 
 def build_redis_settings() -> RedisSettings:
-    return RedisSettings.from_dsn(
-        os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    )
+    return RedisSettings.from_dsn(get_settings().redis_url)
 
 
 async def create_queue():

@@ -1,9 +1,8 @@
-import os
 from functools import lru_cache
 
-from dotenv import load_dotenv
 from openai import OpenAI
 
+from app.config import get_settings
 from app.models import JobDescription
 from app.prompts import build_jd_parse_messages
 from app.structured_output import (
@@ -13,12 +12,10 @@ from app.function_calling import call_required_function
 from app.model_registry import get_model_name
 
 
-load_dotenv()
-
-
 @lru_cache(maxsize=1)
 def get_client() -> OpenAI:
-    api_key = os.getenv("OPENAI_API_KEY")
+    settings = get_settings()
+    api_key = settings.openai_api_key.get_secret_value()
 
     if not api_key:
         raise RuntimeError(
@@ -27,7 +24,7 @@ def get_client() -> OpenAI:
 
     return OpenAI(
         api_key=api_key,
-        base_url=os.getenv("OPENAI_BASE_URL"),
+        base_url=settings.openai_base_url,
     )
 
 
@@ -56,6 +53,9 @@ def parse_job_description(jd_text: str) -> JobDescription:
         [SAVE_JOB_DESCRIPTION_TOOL],
         "save_job_description",
         JobDescription,
-        model_name=get_model_name("jd_parse", os.getenv("OPENAI_MODEL")),
+        model_name=get_model_name(
+            "jd_parse",
+            get_settings().openai_model,
+        ),
         max_attempts=3,
     )

@@ -1,29 +1,22 @@
 import asyncio
-import os
 import random
 
-from dotenv import load_dotenv
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, RateLimitError
+
+from app.config import get_settings
 
 
 def create_async_client() -> AsyncOpenAI:
-    load_dotenv()
+    settings = get_settings()
 
     return AsyncOpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL"),
+        api_key=settings.openai_api_key.get_secret_value(),
+        base_url=settings.openai_base_url,
     )
 
 
 def create_llm_semaphore() -> asyncio.Semaphore:
-    raw = os.getenv("LLM_MAX_CONCURRENCY", "10") # 大模型最大并发数
-
-    try:
-        limit = int(raw)
-    except ValueError:
-        limit = 10
-
-    return asyncio.Semaphore(max(1, limit))
+    return asyncio.Semaphore(get_settings().llm_max_concurrency)
 
 
 async def chat_completion_with_retry_async(

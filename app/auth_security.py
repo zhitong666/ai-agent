@@ -1,25 +1,18 @@
-import os
 from datetime import UTC, datetime, timedelta
 
 import jwt
 from pwdlib import PasswordHash
 
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv("JWT_EXPIRE_MINUTES", "60")
-)
+from app.config import get_settings
+
 
 password_hasher = PasswordHash.recommended()
 
 
 def get_secret_key() -> str:
-    return os.getenv(
-        "JWT_SECRET",
-        "dev-secret-change-me-in-production",
-    )
+    return get_settings().jwt_secret.get_secret_value()
 
 
-# 密码使用 Argon2 哈希，不存明文
 def hash_password(password: str) -> str:
     return password_hasher.hash(password)
 
@@ -36,24 +29,28 @@ def create_access_token(
 ) -> str:
     now = datetime.now(UTC)
     expires_delta = expires_delta or timedelta(
-        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+        minutes=get_settings().jwt_expire_minutes
     )
     expires_at = now + expires_delta
 
     payload = {
-        "sub": subject, # 保存用户名
-        "roles": roles, # 保存角色
-        "tenant_id": tenant_id, # 保存租户
+        "sub": subject,
+        "roles": roles,
+        "tenant_id": tenant_id,
         "iat": int(now.timestamp()),
-        "exp": int(expires_at.timestamp()), # 保存过期时间
+        "exp": int(expires_at.timestamp()),
     }
 
-    return jwt.encode(payload, get_secret_key(), algorithm=ALGORITHM)
+    return jwt.encode(
+        payload,
+        get_secret_key(),
+        algorithm=get_settings().jwt_algorithm,
+    )
 
 
 def decode_access_token(token: str) -> dict:
     return jwt.decode(
         token,
         get_secret_key(),
-        algorithms=[ALGORITHM],
+        algorithms=[get_settings().jwt_algorithm],
     )
