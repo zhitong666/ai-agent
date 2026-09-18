@@ -44,6 +44,9 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
       DATABASE_URL: postgresql://ai_agent:ai_agent@postgres:5432/ai_job_agent
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
       HF_ENDPOINT: https://hf-mirror.com
     ports:
       - "8000:8000"
@@ -52,6 +55,8 @@ services:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     command:
       [

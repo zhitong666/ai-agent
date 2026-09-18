@@ -1,7 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,8 @@ from app.async_agent import (
     stream_answer_question_async,
 )
 from app.async_llm import create_async_client, create_llm_semaphore
+from app.auth_dependencies import require_roles
+from app.auth_router import router as auth_router
 from app.job_store import JobStore
 from app.mcp_agent import stream_mcp_react_loop
 from app.models import (
@@ -41,6 +43,7 @@ from app.supervisor_graph import (
     stream_graph_supervisor,
 )
 from app.tools import build_default_registry
+from app.user_repository import UserRepository
 
 MEMORY_DB_PATH = "data/shared_memory.sqlite"
 
@@ -58,6 +61,7 @@ async def lifespan(app):
     app.state.queue = await create_queue()
     app.state.rate_limiter = RedisRateLimiter(app.state.redis)
     app.state.job_store = JobStore(app.state.redis)
+    app.state.user_repository = UserRepository(app.state.postgres_pool)
 
     postgres_session_store = PostgresSessionStore(app.state.postgres_pool)
     app.state.session_store = RedisSessionCache(
@@ -79,6 +83,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.include_router(auth_router)
 
 
 class ParseRequest(BaseModel):
@@ -224,16 +230,24 @@ class JobStatusResponse(BaseModel):
     response_model=JobStatusResponse,
     status_code=202,
 )
-async def create_analyze_job(request: AnalyzeJobRequest):
+async def create_analyze_job(
+    request: AnalyzeJobRequest,
+    user=Depends(require_roles("user")),
+):
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
 
     job_id = str(uuid.uuid4())
+    payload = {
+        "text": request.text,
+        "tenant_id": user.tenant_id,
+        "user_id": user.sub,
+    }
 
     await app.state.job_store.create(
         job_id,
         "analyze_job",
-        {"text": request.text},
+        payload,
     )
 
     try:
@@ -251,7 +265,7 @@ async def create_analyze_job(request: AnalyzeJobRequest):
         "job_id": job_id,
         "status": "queued",
         "type": "analyze_job",
-        "payload": {"text": request.text},
+        "payload": payload,
     }
 
 
@@ -259,11 +273,18 @@ async def create_analyze_job(request: AnalyzeJobRequest):
     "/jobs/{job_id}",
     response_model=JobStatusResponse,
 )
-async def get_job_status(job_id: str):
+async def get_job_status(
+    job_id: str,
+    user=Depends(require_roles("user")),
+):
     job = await app.state.job_store.get(job_id)
 
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+
+    payload = job.get("payload") or {}
+    if payload.get("tenant_id") != user.tenant_id:
+        raise HTTPException(status_code=403, detail="forbidden")
 
     return job
 
