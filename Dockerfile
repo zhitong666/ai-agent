@@ -25,7 +25,11 @@ WORKDIR /app
 
 RUN groupadd --system app \
     && useradd --system --gid app --create-home --home-dir /app app \
-    && mkdir -p /app/data/chroma /app/data/shared_memory \
+    && mkdir -p \
+        /app/.cache/huggingface \
+        /app/data/chroma \
+        /app/data/shared_memory \
+        /app/data/langgraph_checkpoints \
     && chown -R app:app /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
@@ -40,5 +44,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" || exit 1
 
-ENTRYPOINT ["uvicorn", "app.main:app"]
-CMD ["--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

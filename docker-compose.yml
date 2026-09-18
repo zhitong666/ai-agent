@@ -1,58 +1,76 @@
+name: ai-job-agent
+
+x-app-environment: &app-environment
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+  OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+  LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-10}
+  HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+  HF_HOME: /app/.cache/huggingface
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+  VECTOR_STORE: ${VECTOR_STORE:-chroma}
+  QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+  RERANK_ENABLED: ${RERANK_ENABLED:-true}
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+  JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-ai_agent}:${POSTGRES_PASSWORD:-ai_agent}@postgres:5432/${POSTGRES_DB:-ai_job_agent}
+  REDIS_URL: redis://redis:6379/0
+
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:${POSTGRES_IMAGE_VERSION:-16-alpine}
+    restart: unless-stopped
+    stop_grace_period: 30s
     environment:
-      POSTGRES_USER: ai_agent
-      POSTGRES_PASSWORD: ai_agent
-      POSTGRES_DB: ai_job_agent
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-ai_agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_agent}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_job_agent}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ai_agent -d ai_job_agent"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
 
   redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    image: redis:${REDIS_IMAGE_VERSION:-7-alpine}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - ./data/redis:/data
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
 
   qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
+    image: qdrant/qdrant:${QDRANT_IMAGE_VERSION:-v1.12.6}
+    profiles: ["qdrant"]
+    restart: unless-stopped
     volumes:
-      - ./data/qdrant_storage:/qdrant/storage
+      - qdrant_data:/qdrant/storage
 
   backend:
     build:
       context: .
       dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
-      DATABASE_URL: postgresql://ai_agent:ai_agent@postgres:5432/ai_job_agent
-      REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
-      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
-      HF_ENDPOINT: https://hf-mirror.com
+      <<: *app-environment
+    expose:
+      - "8000"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
-      - ./data/chroma:/app/data/chroma
-      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - chroma_data:/app/data/chroma
+      - hf_cache:/app/.cache/huggingface
+      - shared_memory_data:/app/data/shared_memory
+      - langgraph_data:/app/data/langgraph_checkpoints
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,28 +87,37 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
-      DATABASE_URL: postgresql://ai_agent:ai_agent@postgres:5432/ai_job_agent
-      REDIS_URL: redis://redis:6379/0
-      HF_ENDPOINT: https://hf-mirror.com
+      <<: *app-environment
     volumes:
-      - ./data/chroma:/app/data/chroma
-      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - chroma_data:/app/data/chroma
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     command: [".venv/bin/arq", "app.worker.WorkerSettings"]
-    
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
-      - "5173:80"
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  chroma_data:
+  hf_cache:
+  shared_memory_data:
+  langgraph_data:
+  qdrant_data:
