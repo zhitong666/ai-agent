@@ -7,6 +7,8 @@ x-app-environment: &app-environment
   LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-10}
   HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
   HF_HOME: /app/.cache/huggingface
+  HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+  TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
   VECTOR_STORE: ${VECTOR_STORE:-chroma}
   QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
@@ -15,6 +17,10 @@ x-app-environment: &app-environment
   JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
   DATABASE_URL: postgresql://${POSTGRES_USER:-ai_agent}:${POSTGRES_PASSWORD:-ai_agent}@postgres:5432/${POSTGRES_DB:-ai_job_agent}
   REDIS_URL: redis://redis:6379/0
+
+  OTEL_ENABLED: ${OTEL_ENABLED:-true}
+  OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-ai-job-agent}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
 services:
   postgres:
@@ -67,8 +73,8 @@ services:
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
+      - ${HOME}/.cache/huggingface:/app/.cache/huggingface:ro
       - chroma_data:/app/data/chroma
-      - hf_cache:/app/.cache/huggingface
       - shared_memory_data:/app/data/shared_memory
       - langgraph_data:/app/data/langgraph_checkpoints
     depends_on:
@@ -93,8 +99,8 @@ services:
     environment:
       <<: *app-environment
     volumes:
+      - ${HOME}/.cache/huggingface:/app/.cache/huggingface:ro
       - chroma_data:/app/data/chroma
-      - hf_cache:/app/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy

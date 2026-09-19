@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     )
     debug: bool = False
 
+    otel_enabled: bool = True
+    otel_service_name: str = "ai-job-agent"
+    otel_exporter_otlp_endpoint: str | None = None
+
     openai_api_key: SecretStr = Field(min_length=1)
     openai_model: str = "deepseek-chat"
     openai_base_url: str = "https://api.deepseek.com"

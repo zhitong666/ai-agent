@@ -2,9 +2,15 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+from opentelemetry import trace
 from pydantic import BaseModel, Field
 
 from app.sensitive_data import mask_value
+from app.tracing import get_tracer
+
+
+tracer = get_tracer("ai-job-agent.agent")
 
 
 def _now() -> str:
@@ -34,7 +40,7 @@ class ObservabilityStore:
             question=mask_value(question),
         )
         return trace_id
-    
+
     def record(self, trace_id: str, event_type: str, **data) -> None:
         trace = self._traces.setdefault(
             trace_id,
@@ -96,33 +102,50 @@ def sse_to_event(raw_event: str) -> tuple[str, object]:
 def trace_stream(store, question, trace_id, stream):
     store.start_trace(question, trace_id)
 
-    yield f"event: trace\ndata: {trace_id}\n\n"
+    with tracer.start_as_current_span("agent.trace") as span:
+        span.set_attribute("agent.trace_id", trace_id)
+        span.set_attribute("agent.question", mask_value(question))
 
-    for raw_event in stream:
-        event_name, data = sse_to_event(raw_event)
+        yield f"event: trace\ndata: {trace_id}\n\n"
 
-        if event_name == "step":
-            store.record(
-                trace_id,
-                "step",
-                tool=data.get("tool"),
-                input=data.get("input"),
-                observation=data.get("observation"),
+        for raw_event in stream:
+            event_name, data = sse_to_event(raw_event)
+
+            masked_data = mask_value(data)
+            span.add_event(
+                event_name,
+                attributes={
+                    "data": json.dumps(
+                        masked_data,
+                        ensure_ascii=False,
+                    )
+                },
             )
-        elif event_name == "approval":
-            store.record(
-                trace_id,
-                "approval",
-                tool=data.get("tool"),
-                arguments=data.get("arguments"),
-            )
-        elif event_name == "answer":
-            store.record(trace_id, "answer", answer=data)
-        elif event_name == "error":
-            store.record(trace_id, "error", message=data)
-        elif event_name == "done":
-            store.record(trace_id, "done")
 
-        yield raw_event
+            if event_name == "step":
+                store.record(
+                    trace_id,
+                    "step",
+                    tool=data.get("tool"),
+                    input=data.get("input"),
+                    observation=data.get("observation"),
+                )
+            elif event_name == "approval":
+                store.record(
+                    trace_id,
+                    "approval",
+                    tool=data.get("tool"),
+                    arguments=data.get("arguments"),
+                )
+            elif event_name == "answer":
+                store.record(trace_id, "answer", answer=data)
+            elif event_name == "error":
+                store.record(trace_id, "error", message=data)
+                span.set_status(trace.Status(trace.StatusCode.ERROR))
+            elif event_name == "done":
+                store.record(trace_id, "done")
+
+            yield raw_event
+
 
 observability_store = ObservabilityStore()
