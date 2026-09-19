@@ -9,11 +9,12 @@ def read(path):
     return path.read_text(encoding="utf-8")
 
 
-def test_backend_dockerfile_exists_and_runs_fastapi():
+def test_backend_dockerfile_uses_pinned_multistage_build():
     dockerfile = read(ROOT / "Dockerfile")
 
-    assert "FROM python:3.12-slim" in dockerfile
-    assert "COPY app ./app" in dockerfile
+    assert "FROM python:3.12.9-slim AS builder" in dockerfile
+    assert "FROM python:3.12.9-slim AS runtime" in dockerfile
+    assert "COPY --from=builder" in dockerfile
     assert "uvicorn" in dockerfile
     assert "app.main:app" in dockerfile
 
@@ -43,10 +44,13 @@ def test_nginx_proxies_backend_streams():
     assert "/agent/" in config
 
 
-def test_compose_defines_backend_and_frontend():
+def test_compose_defines_services_and_named_volumes():
     compose = read(ROOT / "docker-compose.yml")
 
     assert "backend:" in compose
+    assert "worker:" in compose
     assert "frontend:" in compose
     assert "OPENAI_API_KEY" in compose
-    assert "./data/chroma:/app/data/chroma" in compose
+    assert "chroma_data:/app/data/chroma" in compose
+    assert "postgres_data:/var/lib/postgresql/data" in compose
+    assert "./data/chroma:/app/data/chroma" not in compose
