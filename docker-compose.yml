@@ -22,6 +22,11 @@ x-app-environment: &app-environment
   OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-ai-job-agent}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
+  LLM_COST_BUDGET_USD: ${LLM_COST_BUDGET_USD:-0}
+  LLM_CACHE_ENABLED: ${LLM_CACHE_ENABLED:-false}
+  LLM_CACHE_TTL_SECONDS: ${LLM_CACHE_TTL_SECONDS:-300}
+  LLM_FALLBACK_MODELS_CSV: ${LLM_FALLBACK_MODELS_CSV:-deepseek-reasoner}
+
 services:
   postgres:
     image: postgres:${POSTGRES_IMAGE_VERSION:-16-alpine}
@@ -99,13 +104,23 @@ services:
     environment:
       <<: *app-environment
     volumes:
-      - ${HOME}/.cache/huggingface:/app/.cache/huggingface:ro
       - chroma_data:/app/data/chroma
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          ".venv/bin/python -c \"import os, redis; redis.Redis.from_url(os.environ['REDIS_URL']).ping()\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     command: [".venv/bin/arq", "app.worker.WorkerSettings"]
 
   frontend:

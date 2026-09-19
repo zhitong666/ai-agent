@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     openai_model: str = "deepseek-chat"
     openai_base_url: str = "https://api.deepseek.com"
     llm_max_concurrency: int = 10
+    llm_cost_budget_usd: float = 0.0
+    llm_cache_enabled: bool = False
+    llm_cache_ttl_seconds: int = 300
+    llm_fallback_models_csv: str = "deepseek-reasoner"
 
     database_url: str = (
         "postgresql://ai_agent:ai_agent@localhost:5432/ai_job_agent"
@@ -97,6 +101,20 @@ class Settings(BaseSettings):
         if not 0 <= value <= 1:
             raise ValueError("hybrid_alpha must be between 0 and 1")
 
+        return value
+
+    @field_validator("llm_cost_budget_usd")
+    @classmethod
+    def validate_llm_cost_budget_usd(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("llm_cost_budget_usd must be >= 0")
+        return value
+
+    @field_validator("llm_cache_ttl_seconds")
+    @classmethod
+    def validate_llm_cache_ttl_seconds(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("llm_cache_ttl_seconds must be >= 1")
         return value
 
 
