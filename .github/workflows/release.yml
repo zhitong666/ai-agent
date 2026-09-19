@@ -50,7 +50,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: ./frontend
-          file: Dockerfile
+          file: frontend/Dockerfile
           push: true
           tags: ghcr.io/zhitong666/ai-agent-frontend:latest
           cache-from: type=gha
