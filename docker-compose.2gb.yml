@@ -1,0 +1,94 @@
+name: ai-job-agent-2gb
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ai_agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_agent}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_job_agent}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_agent -d ai_job_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--maxmemory",
+        "128mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      APP_ENV: production
+      DEBUG: "false"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ai_agent}:${POSTGRES_PASSWORD:-ai_agent}@postgres:5432/${POSTGRES_DB:-ai_job_agent}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET}
+      EMBEDDING_PROVIDER: remote
+      REMOTE_EMBEDDING_API_KEY: ${REMOTE_EMBEDDING_API_KEY}
+      REMOTE_EMBEDDING_BASE_URL: ${REMOTE_EMBEDDING_BASE_URL}
+      REMOTE_EMBEDDING_MODEL: ${REMOTE_EMBEDDING_MODEL}
+      REMOTE_EMBEDDING_DIMENSION: ${REMOTE_EMBEDDING_DIMENSION}
+      VECTOR_STORE: chroma
+      RERANK_ENABLED: "false"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - chroma_data:/app/data/chroma
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      [
+        "sh",
+        "-c",
+        ".venv/bin/python -m app.db_cli migrate && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000",
+      ]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  chroma_data:

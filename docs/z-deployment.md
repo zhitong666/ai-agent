@@ -898,3 +898,157 @@ docker system prune
 10. 最后再接触 Kubernetes。
 
 每一步都先解决一个实际问题，再扩展新概念，比一次性啃完所有知识更有效。
+
+## 23. Docker 资源清理与依赖关系
+
+### 23.1 为什么会出现 `short read: unexpected EOF`
+
+构建时如果看到：
+
+```text
+failed to compute cache key:
+short read: expected ... bytes but got 0:
+unexpected EOF
+```
+
+通常不是项目依赖缺失，而是 Docker 本地缓存或镜像层不完整。
+
+常见原因：
+
+- 拉取基础镜像时网络中断。
+- 之前手动删除镜像或 BuildKit 缓存，导致缓存引用不完整。
+- Docker Desktop 虚拟磁盘空间不足。
+- BuildKit 本地缓存损坏。
+
+### 23.2 安全清理步骤
+
+先停止当前项目：
+
+```bash
+docker compose -f docker-compose.2gb.yml down
+```
+
+清理构建缓存：
+
+```bash
+docker builder prune -f
+```
+
+如果仍然失败：
+
+```bash
+docker builder prune -a -f
+```
+
+删除悬空镜像：
+
+```bash
+docker image prune -f
+```
+
+删除未使用的镜像：
+
+```bash
+docker image prune -a -f
+```
+
+重新拉取基础镜像：
+
+```bash
+docker pull node:22-alpine
+docker pull nginx:alpine
+docker pull python:3.12.9-slim
+docker pull postgres:16-alpine
+docker pull redis:7-alpine
+```
+
+重新构建：
+
+```bash
+docker compose -f docker-compose.2gb.yml build backend frontend
+```
+
+如果缓存仍然异常，使用无缓存构建：
+
+```bash
+docker compose -f docker-compose.2gb.yml build --no-cache backend frontend
+```
+
+### 23.3 可以删除的资源
+
+| 资源 | 是否可以删除 | 命令 |
+|---|---|---|
+| BuildKit 构建缓存 | 可以 | `docker builder prune -a -f` |
+| 悬空镜像 `<none>` | 可以 | `docker image prune -f` |
+| 未使用镜像 | 可以 | `docker image prune -a -f` |
+| 已停止容器 | 可以 | `docker container prune -f` |
+| 未使用网络 | 可以 | `docker network prune -f` |
+| 不再使用的 Volume | 可以，但需要确认 | `docker volume prune` |
+| HuggingFace 本地模型缓存 | 使用远程 Embedding 后可以 | `rm -rf ~/.cache/huggingface` |
+
+### 23.4 不能随意删除的资源
+
+| 资源 | 原因 |
+|---|---|
+| 正在运行容器使用的镜像 | 删除会导致容器后续无法重启 |
+| `postgres_data` | 保存 PostgreSQL 数据 |
+| `redis_data` | 保存 Redis 持久化数据 |
+| `chroma_data` | 保存向量库数据 |
+| `.env` | 保存密钥和运行配置 |
+| 项目源码和 `uv.lock` | 决定镜像如何构建 |
+| 当前正在使用的网络 | 服务之间依赖该网络通信 |
+
+### 23.5 Docker 资源之间的关系
+
+```mermaid
+flowchart LR
+    A[Dockerfile] --> B[Image]
+    B --> C[Container]
+    C --> D[Volume]
+    C --> E[Network]
+    B --> F[Build Cache]
+    F --> B
+```
+
+解释：
+
+- Dockerfile 描述如何构建镜像。
+- Image 是只读模板。
+- Container 是镜像运行出来的实例。
+- Volume 保存容器退出后仍然需要的数据。
+- Network 让不同容器互相访问。
+- Build Cache 加速重复构建，但缓存损坏时会导致构建失败。
+
+### 23.6 本项目 2GB 部署建议
+
+2GB 服务器上建议：
+
+```text
+远程 LLM
+  +
+远程 Embedding
+  +
+PostgreSQL
+  +
+Redis
+  +
+FastAPI backend
+  +
+frontend Nginx
+```
+
+先不运行：
+
+```text
+Qdrant
+Worker
+本地 sentence-transformers
+```
+
+使用：
+
+```bash
+docker compose -f docker-compose.2gb.yml up -d --build
+```
+
+这样可以显著降低内存和镜像体积。

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from sentence_transformers import SentenceTransformer
+from app.config import get_settings
 
 EmbeddingScenario = Literal[
     "rag_chinese",
@@ -184,7 +184,16 @@ def get_embedding_model_name(
 
 
 @lru_cache(maxsize=8)
-def load_embedding_model(name: str) -> SentenceTransformer:
+def load_embedding_model(name: str):
+    settings = get_settings()
+
+    if settings.embedding_provider == "remote":
+        from app.remote_embedding import RemoteEmbeddingModel
+
+        return RemoteEmbeddingModel(name)
+
+    from sentence_transformers import SentenceTransformer
+
     get_embedding_profile(name)
     return SentenceTransformer(name)
 

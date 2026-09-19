@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     hf_endpoint: str = "https://hf-mirror.com"
     hf_home: str = "/app/.cache/huggingface"
 
+    embedding_provider: str = "remote"
+    remote_embedding_api_key: SecretStr = Field(default="")
+    remote_embedding_base_url: str = ""
+    remote_embedding_model: str = ""
+    remote_embedding_dimension: int = 1024
+
     @field_validator("environment")
     @classmethod
     def validate_environment(cls, value: str) -> str:
