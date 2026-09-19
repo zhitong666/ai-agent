@@ -1,7 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -44,6 +44,11 @@ from app.supervisor_graph import (
 )
 from app.tools import build_default_registry
 from app.user_repository import UserRepository
+from app.http_observability import (
+    ObservabilityMiddleware,
+)
+from app.logging_config import configure_logging
+from app.metrics import CONTENT_TYPE_LATEST, metrics
 
 MEMORY_DB_PATH = "data/shared_memory.sqlite"
 
@@ -84,6 +89,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+configure_logging()
+app.add_middleware(ObservabilityMiddleware)
+
 app.include_router(auth_router)
 
 
@@ -94,6 +102,14 @@ class ParseRequest(BaseModel):
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    return Response(
+        metrics.render(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 
 
 @app.get("/health/db")
