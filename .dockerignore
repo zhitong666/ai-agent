@@ -20,3 +20,5 @@ data/*.sqlite
 data/eval_set.json
 data/rag_eval_set.json
 data/agent_eval_set.json
+
+!data/knowledge_base.json
