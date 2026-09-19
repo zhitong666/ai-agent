@@ -73,6 +73,9 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: sk-ci-test-key
+      JWT_SECRET: ci-secret-at-least-32-characters-long
     needs:
       - backend
       - frontend
