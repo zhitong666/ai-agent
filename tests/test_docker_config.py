@@ -31,7 +31,8 @@ def test_frontend_dockerfile_builds_react():
     dockerfile = read(FRONTEND / "Dockerfile")
 
     assert "FROM node:22-alpine" in dockerfile
-    assert "npm run build" in dockerfile
+    assert "pnpm install --frozen-lockfile" in dockerfile
+    assert "pnpm build" in dockerfile
     assert "nginx:alpine" in dockerfile
 
 

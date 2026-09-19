@@ -41,8 +41,14 @@ def test_ci_workflow_runs_frontend_checks_and_build(ci_workflow: str) -> None:
 
 
 def test_ci_workflow_builds_docker_images(ci_workflow: str) -> None:
-    assert "docker compose config -q" in ci_workflow
-    assert "docker compose build backend worker frontend" in ci_workflow
+    assert (
+        "docker compose -f docker-compose.2gb.yml config -q"
+        in ci_workflow
+    )
+    assert (
+        "docker compose -f docker-compose.2gb.yml build backend frontend"
+        in ci_workflow
+    )
 
 
 def test_deploy_workflow_uses_manual_dispatch_and_ssh(

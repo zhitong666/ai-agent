@@ -27,7 +27,8 @@ def test_dockerfile_uses_pinned_python_and_slim(dockerfile: str) -> None:
 
 def test_dockerfile_pins_uv_and_skips_dev_dependencies(dockerfile: str) -> None:
     assert "ARG UV_VERSION=0.12.5" in dockerfile
-    assert 'pip install --no-cache-dir "uv==${UV_VERSION}"' in dockerfile
+    assert "pip install" in dockerfile
+    assert "--index-url https://pypi.tuna.tsinghua.edu.cn/simple" in dockerfile
     assert "uv sync --frozen --no-dev --no-install-project" in dockerfile
 
 

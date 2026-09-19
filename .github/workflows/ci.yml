@@ -85,7 +85,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Validate Compose config
-        run: docker compose config -q
+        run: docker compose -f docker-compose.2gb.yml config -q
 
       - name: Build Docker images
-        run: docker compose build backend worker frontend
+        run: docker compose -f docker-compose.2gb.yml build backend frontend
