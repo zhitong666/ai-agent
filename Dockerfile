@@ -12,7 +12,11 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 
-RUN pip install --no-cache-dir "uv==${UV_VERSION}" \
+RUN pip install \
+    --no-cache-dir \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    --trusted-host pypi.tuna.tsinghua.edu.cn \
+    "uv==${UV_VERSION}" \
     && uv sync --frozen --no-dev --no-install-project
 
 FROM python:3.12.9-slim AS runtime
