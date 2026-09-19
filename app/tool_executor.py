@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from app.guards import validate_tool_arguments
 
+
 @dataclass
 class ToolExecutionResult:
     ok: bool

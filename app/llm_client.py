@@ -2,6 +2,7 @@ import time
 
 from openai import APIConnectionError, APITimeoutError, RateLimitError
 
+
 def chat_completion_with_retry(
     client,
     *,

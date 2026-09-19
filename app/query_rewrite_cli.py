@@ -1,7 +1,7 @@
 import argparse
 
-from app.llm import client
 from app.agent import get_retriever
+from app.llm import client
 from app.query_rewriter import (
     fallback_rewrite,
     multi_query_retrieve,

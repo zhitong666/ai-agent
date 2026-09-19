@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.models import ReactStep
 
+
 class AgentState(BaseModel):
     question: str
     status: Literal["running", "finished", "failed"] = "running"

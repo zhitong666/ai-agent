@@ -1,12 +1,10 @@
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from app.agent import analyze_job
-from app.models import SupervisorDecision, WorkerResult
+from app.models import HandoffDecision, SupervisorDecision, WorkerResult
 from app.plan_execute import execute_plan, plan_task
 from app.tools import build_default_registry
-from app.models import HandoffDecision, SupervisorDecision, WorkerResult
-
 
 JD_MARKERS = (
     "招聘",

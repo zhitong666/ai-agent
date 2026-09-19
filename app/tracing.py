@@ -12,7 +12,6 @@ from opentelemetry.sdk.trace.export import (
 
 from app.config import get_settings
 
-
 _provider_configured = False
 
 

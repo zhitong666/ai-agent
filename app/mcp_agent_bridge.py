@@ -5,12 +5,12 @@ from app.mcp_client import (
     call_mcp_tool_sync,
     list_mcp_tools_sync,
 )
-from app.tools import Tool, ToolRegistry
+from app.prompt_guard import guard_tool_arguments
+from app.sensitive_data import mask_value
 from app.tool_policy import (
     build_default_tool_permission_policy,
 )
-from app.prompt_guard import guard_tool_arguments
-from app.sensitive_data import mask_value
+from app.tools import Tool, ToolRegistry
 
 
 def _serialize_result(result) -> str:

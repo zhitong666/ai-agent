@@ -55,7 +55,25 @@ default = true
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
+[tool.ruff]
+target-version = "py312"
+extend-exclude = [
+    "docs",
+    "tests",
+    "data",
+    "frontend",
+    "scripts",
+    "benchmarks",
+    "app/day1.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "UP047"]
+
 [tool.ruff.lint.per-file-ignores]
+"app/agent_eval_cli.py" = ["BLE001"]
 "app/auth_dependencies.py" = ["B008"]
 "app/auth_router.py" = ["B008"]
+"app/config_cli.py" = ["BLE001"]
 "app/main.py" = ["B008"]

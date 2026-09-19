@@ -10,7 +10,6 @@ from app.metrics import metrics
 from app.request_context import request_id_var
 from app.tracing import get_tracer
 
-
 logger = logging.getLogger("http")
 tracer = get_tracer("ai-job-agent.http")
 

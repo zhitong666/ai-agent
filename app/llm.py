@@ -3,13 +3,13 @@ from functools import lru_cache
 from openai import OpenAI
 
 from app.config import get_settings
+from app.function_calling import call_required_function
+from app.model_registry import get_model_name
 from app.models import JobDescription
 from app.prompts import build_jd_parse_messages
 from app.structured_output import (
     build_tool_parameters_from_model,
 )
-from app.function_calling import call_required_function
-from app.model_registry import get_model_name
 
 
 @lru_cache(maxsize=1)

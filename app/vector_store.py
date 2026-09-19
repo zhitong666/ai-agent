@@ -129,7 +129,11 @@ class ChromaStore:
 
     def load_embeddings(self, chunk_ids: list[str]) -> np.ndarray:
         result = self.collection.get(ids=chunk_ids, include=["embeddings"])
-        by_id = dict(zip(result["ids"], result["embeddings"]))
+        by_id = dict(zip(
+            result["ids"], 
+            result["embeddings"], 
+            strict=False,
+        ))
         return np.array([by_id[chunk_id] for chunk_id in chunk_ids])
 
     def has_chunks(self, chunk_ids: list[str]) -> bool:
@@ -161,7 +165,11 @@ class ChromaStore:
                 "id": chunk_id,
                 "score": float(1.0 - distance),
             }
-            for chunk_id, distance in zip(ids, distances)
+            for chunk_id, distance in zip(
+                ids, 
+                distances,
+                strict=False,
+            )
         ]
 
 
@@ -199,7 +207,11 @@ class QdrantStore:
     def upsert(self, chunks: list[dict], embeddings: np.ndarray) -> None:
         points = []
 
-        for chunk, embedding in zip(chunks, embeddings):
+        for chunk, embedding in zip(
+            chunks, 
+            embeddings,
+            strict=False,
+        ):
             points.append(
                 PointStruct(
                     id=chunk["chunk_id"],

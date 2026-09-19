@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from opentelemetry import trace
@@ -9,12 +9,11 @@ from pydantic import BaseModel, Field
 from app.sensitive_data import mask_value
 from app.tracing import get_tracer
 
-
 tracer = get_tracer("ai-job-agent.agent")
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class TraceEvent(BaseModel):

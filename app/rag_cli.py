@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.rag import build_retriever
 
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("query")

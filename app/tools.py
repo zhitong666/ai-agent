@@ -1,13 +1,12 @@
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-import os 
 
 from app.agent import format_context
 from app.llm import client
 from app.query_rewriter import multi_query_retrieve
-
 
 FINISH_TOOL_NAME = "finish"
 KNOWLEDGE_BASE_PATH = Path("data/knowledge_base.json")

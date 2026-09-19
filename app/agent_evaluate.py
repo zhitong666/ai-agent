@@ -66,7 +66,7 @@ def evaluate_agent_runs(results: list[ReactResult], eval_set: list[dict]) -> dic
     violation_count = 0
     details = []
 
-    for result, case in zip(results, eval_set):
+    for result, case in zip(results, eval_set, strict=False):
         detail = evaluate_agent_run(result, case)
         recalls.append(detail["required_tool_recall"])
         keyword_scores.append(detail["answer_keyword_coverage"])

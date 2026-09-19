@@ -1,21 +1,20 @@
 import os
+from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
-from collections.abc import Iterator
 
-from app.llm import client, parse_job_description
-from app.models import JobAnalysis, ChatResponse, Source
-from app.rag import build_retriever
-from app.memory import session_store
-from app.streaming import sse_event
 from app.context import ContextBudget
+from app.function_calling import call_required_function
+from app.llm import client, parse_job_description
+from app.memory import session_store
+from app.model_registry import get_model_name
+from app.models import ChatResponse, JobAnalysis, Source
 from app.prompts import build_analysis_messages, build_chat_messages
+from app.rag import build_retriever
+from app.streaming import sse_event
 from app.structured_output import (
     build_tool_parameters_from_model,
 )
-from app.function_calling import call_required_function
-from app.model_registry import get_model_name
-
 
 ANALYSIS_TOOL = {
     "type": "function",

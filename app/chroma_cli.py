@@ -1,5 +1,6 @@
 # 用来验证“重启后不用重新 Embedding”。逻辑和 rag_cli.py 类似，但可以直接调用 store.query 观察 Chroma 的结果
 from pathlib import Path
+
 from app.rag import build_retriever
 
 

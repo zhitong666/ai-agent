@@ -1,5 +1,4 @@
 import argparse
-import sys
 
 from app.agent import get_retriever
 from app.supervisor import run_supervisor

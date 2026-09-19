@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
+from prometheus_client import CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field
 
 from app.agent import get_retriever
@@ -16,8 +17,13 @@ from app.async_agent import (
 from app.async_llm import create_async_client, create_llm_semaphore
 from app.auth_dependencies import require_roles
 from app.auth_router import router as auth_router
+from app.http_observability import (
+    ObservabilityMiddleware,
+)
 from app.job_store import JobStore
+from app.logging_config import configure_logging
 from app.mcp_agent import stream_mcp_react_loop
+from app.metrics import metrics
 from app.models import (
     ChatResponse,
     GraphRunStatus,
@@ -44,11 +50,6 @@ from app.supervisor_graph import (
 )
 from app.tools import build_default_registry
 from app.user_repository import UserRepository
-from app.http_observability import (
-    ObservabilityMiddleware,
-)
-from app.logging_config import configure_logging
-from app.metrics import CONTENT_TYPE_LATEST, metrics
 
 MEMORY_DB_PATH = "data/shared_memory.sqlite"
 

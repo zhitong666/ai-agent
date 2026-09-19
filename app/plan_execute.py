@@ -13,7 +13,6 @@ from app.streaming import sse_event
 from app.structured_output import build_tool_parameters_from_model
 from app.tool_executor import execute_registered_tool
 
-
 PLANNER_TOOL_NAMES = {"search_knowledge", "list_knowledge_titles"}
 
 SAVE_PLAN_TOOL = {

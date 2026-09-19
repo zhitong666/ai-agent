@@ -1,20 +1,23 @@
-from functools import partial
-from typing import Iterator, TypedDict
-import uuid
-from pathlib import Path
-import sqlite3
-from langgraph.graph import END, StateGraph
-from langgraph.checkpoint.sqlite import SqliteSaver
 import concurrent.futures
+import sqlite3
+import uuid
+from collections.abc import Iterator
+from functools import partial
+from pathlib import Path
+from typing import TypedDict
+
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, StateGraph
 
 from app.agent import get_retriever
 from app.models import (
+    GraphRunStatus,
     HandoffDecision,
     SupervisorDecision,
     SupervisorResult,
     WorkerResult,
-    GraphRunStatus,
 )
+from app.shared_memory import SharedMemoryStore
 from app.streaming import sse_event
 from app.supervisor import (
     decide_worker,
@@ -22,8 +25,6 @@ from app.supervisor import (
     get_max_handoffs,
 )
 from app.workers import WorkerRegistry, build_default_worker_registry
-from app.shared_memory import SharedMemoryStore
-
 
 CHECKPOINT_DB_PATH = Path("data/langgraph_checkpoints.sqlite")
 CHECKPOINT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)

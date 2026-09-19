@@ -5,7 +5,6 @@ from pwdlib import PasswordHash
 
 from app.config import get_settings
 
-
 password_hasher = PasswordHash.recommended()
 
 

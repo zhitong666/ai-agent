@@ -7,8 +7,8 @@ from prometheus_client import (
 )
 
 from app.config import get_settings
-from app.model_registry import estimate_cost
 from app.metrics import metrics as http_metrics
+from app.model_registry import estimate_cost
 
 
 class CostBudgetExceededError(RuntimeError):

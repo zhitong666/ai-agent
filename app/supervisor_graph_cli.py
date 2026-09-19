@@ -1,6 +1,5 @@
 import argparse
 import json
-import sys
 
 from app.agent import get_retriever
 from app.shared_memory import SharedMemoryStore

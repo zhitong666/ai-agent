@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 def load_eval_set(path: Path) -> list[dict]:
@@ -29,7 +29,11 @@ def mrr(retrieved_ids_list: list[list[str]], relevant_ids_list: list[list[str]])
 
     scores = []
 
-    for retrieved_ids, relevant_ids in zip(retrieved_ids_list, relevant_ids_list):
+    for retrieved_ids, relevant_ids in zip(
+        retrieved_ids_list,
+        relevant_ids_list,
+        strict=False,
+    ):
         relevant = set(relevant_ids)
         for index, chunk_id in enumerate(retrieved_ids, start=1):
             if chunk_id in relevant:

@@ -1,6 +1,7 @@
-from typing import Literal, Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
 
 class JobDescription(BaseModel):
     company: str = Field(..., min_length=1, description="公司名称")

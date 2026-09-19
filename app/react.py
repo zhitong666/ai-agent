@@ -13,12 +13,11 @@ from app.guards import (
     validate_tool_arguments,
 )
 from app.llm import client
-from app.models import ReactResult, ReactStep
-from app.tools import FINISH_TOOL_NAME, build_default_registry
-from app.streaming import sse_event
 from app.model_registry import get_model_name
+from app.models import ReactResult, ReactStep
 from app.prompt_guard import guard_user_input
-
+from app.streaming import sse_event
+from app.tools import FINISH_TOOL_NAME, build_default_registry
 
 REACT_SYSTEM_PROMPT = """你是 AI 岗位咨询 Agent。
 先用 search_knowledge 或 list_knowledge_titles 了解知识库，再根据结果回答。

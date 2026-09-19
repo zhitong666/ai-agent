@@ -1,20 +1,20 @@
-import json 
-from pathlib import Path
 import hashlib
+import json
 import os
+from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from functools import lru_cache
+from sentence_transformers import CrossEncoder
 
-from app.chunking import chunk_documents
 from app.bm25 import BM25
-from app.vector_store import build_vector_store
+from app.chunking import chunk_documents
 from app.embedding_registry import (
     get_embedding_model_name,
     get_embedding_profile,
     load_embedding_model,
 )
+from app.vector_store import build_vector_store
 
 
 def _collection_name_for_model(model_name: str, dimension: int) -> str:
@@ -218,7 +218,11 @@ class HybridRerankRetriever:
 
         candidates = []
 
-        for chunk_id, combined_score in zip(union_ids, combined_scores):
+        for chunk_id, combined_score in zip(
+            union_ids,
+            combined_scores,
+            strict=False,
+        ):
             candidates.append(
                 {
                     "doc": self._chunks_by_id[chunk_id],

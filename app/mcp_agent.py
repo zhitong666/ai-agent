@@ -3,7 +3,6 @@ from collections.abc import Callable, Iterator
 from app.agent import get_retriever
 from app.mcp_agent_bridge import (
     build_mcp_agent_system_prompt,
-    build_mcp_tool_registry,
     discover_mcp_tool_registry,
 )
 from app.react import run_react_loop, stream_react_loop

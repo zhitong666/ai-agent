@@ -5,12 +5,16 @@ from app.agent import get_retriever
 from app.function_calling import call_required_function
 from app.llm import client
 from app.model_registry import get_model_name
-from app.models import SupervisorDecision, SupervisorResult, WorkerResult, HandoffDecision
+from app.models import (
+    HandoffDecision,
+    SupervisorDecision,
+    SupervisorResult,
+    WorkerResult,
+)
 from app.prompts import build_supervisor_messages
 from app.streaming import sse_event
 from app.structured_output import build_tool_parameters_from_model
 from app.workers import WorkerRegistry, build_default_worker_registry
-
 
 SUPERVISOR_DECISION_TOOL = {
     "type": "function",
