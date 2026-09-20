@@ -52,13 +52,21 @@ export default function App() {
       return;
     }
 
+    function createId() {
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+      }
+
+      return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
     const userMessage: Message = {
-      id: crypto.randomUUID(),
+      id: createId(),
       role: "user",
       content: question,
     };
 
-    const assistantId = crypto.randomUUID();
+    const assistantId = createId();
     const assistantMessage: Message = {
       id: assistantId,
       role: "assistant",
