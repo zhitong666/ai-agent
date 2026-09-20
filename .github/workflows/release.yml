@@ -30,7 +30,9 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          tags: ghcr.io/zhitong666/ai-agent-backend:latest
+          tags: |
+            ghcr.io/zhitong666/ai-agent-backend:${{ github.sha }}
+            ghcr.io/zhitong666/ai-agent-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -52,6 +54,8 @@ jobs:
           context: ./frontend
           file: frontend/Dockerfile
           push: true
-          tags: ghcr.io/zhitong666/ai-agent-frontend:latest
+          tags: |
+            ghcr.io/zhitong666/ai-agent-frontend:${{ github.sha }}
+            ghcr.io/zhitong666/ai-agent-frontend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
