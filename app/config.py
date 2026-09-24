@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
 
+    demo_username: str = "demo"
+    demo_password: str = "Demo@2026"
+    allow_registration: bool = False
+
+    guest_daily_questions: int = 5
+    guest_daily_tokens: int = 20000
+    authenticated_daily_questions: int = 0
+    authenticated_daily_tokens: int = 0
+    quota_timezone: str = "Asia/Shanghai"
+
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     vector_store: str = "chroma"
     qdrant_url: str = "http://localhost:6333"
@@ -114,6 +124,34 @@ class Settings(BaseSettings):
     def validate_llm_cost_budget_usd(cls, value: float) -> float:
         if value < 0:
             raise ValueError("llm_cost_budget_usd must be >= 0")
+        return value
+
+    @field_validator("guest_daily_questions")
+    @classmethod
+    def validate_guest_daily_questions(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("guest_daily_questions must be >= 1")
+        return value
+
+    @field_validator("guest_daily_tokens")
+    @classmethod
+    def validate_guest_daily_tokens(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("guest_daily_tokens must be >= 1")
+        return value
+
+    @field_validator("authenticated_daily_questions")
+    @classmethod
+    def validate_authenticated_daily_questions(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("authenticated_daily_questions must be >= 0")
+        return value
+
+    @field_validator("authenticated_daily_tokens")
+    @classmethod
+    def validate_authenticated_daily_tokens(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("authenticated_daily_tokens must be >= 0")
         return value
 
     @field_validator("llm_cache_ttl_seconds")

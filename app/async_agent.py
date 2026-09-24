@@ -114,18 +114,22 @@ async def answer_question_async(
     client,
     session_id: str,
     question: str,
+    scene: str = "job",
     retriever=None,
     semaphore=None,
     session_store=None,
 ) -> ChatResponse:
     history = await _load_history(session_store, session_id)
-    retriever = retriever or get_retriever()
+    sources = []
+    context = ""
 
-    results = await _retrieve(retriever, question, top_k=3)
-    sources = build_sources(results)
-    context = format_context(results)
+    if scene in {"job", "project"}:
+        retriever = retriever or get_retriever()
+        results = await _retrieve(retriever, question, top_k=3)
+        sources = build_sources(results)
+        context = format_context(results)
 
-    messages = build_chat_messages(history, context, question)
+    messages = build_chat_messages(history, context, question, scene=scene)
     messages = ContextBudget().fit_messages(messages)
 
     response = await chat_completion_with_retry_async(
@@ -148,17 +152,20 @@ async def stream_answer_question_async(
     client,
     session_id: str,
     question: str,
+    scene: str = "job",
     retriever=None,
     semaphore=None,
     session_store=None,
 ) -> AsyncIterator[str]:
     history = await _load_history(session_store, session_id)
-    retriever = retriever or get_retriever()
+    context = ""
 
-    results = await _retrieve(retriever, question, top_k=3)
-    context = format_context(results)
+    if scene in {"job", "project"}:
+        retriever = retriever or get_retriever()
+        results = await _retrieve(retriever, question, top_k=3)
+        context = format_context(results)
 
-    messages = build_chat_messages(history, context, question)
+    messages = build_chat_messages(history, context, question, scene=scene)
     messages = ContextBudget().fit_messages(messages)
 
     response = await chat_completion_with_retry_async(

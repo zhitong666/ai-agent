@@ -242,9 +242,9 @@ return JobDescription.model_validate(arguments)
 
 完整解析流程：
 
-```
+```mermaid
 flowchart LR
-    A[message.tool_calls] --> B[tool_calls[0]]
+    A[message.tool_calls] --> B["tool_calls[0]"]
     B --> C[function.arguments]
     C --> D[json.loads]
     D --> E[Python 字典]

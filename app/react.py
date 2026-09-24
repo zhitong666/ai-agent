@@ -304,6 +304,16 @@ def stream_react_loop(
     state.question = question
     state.mark_running()
 
+    try:
+        retriever = retriever or get_retriever()
+        registry = registry or build_default_registry()
+        tools = registry.to_openai_tools()
+    except Exception as exc:
+        state.mark_failed()
+        yield sse_event("error", f"Agent 初始化失败：{exc}")
+        yield sse_event("done", "")
+        return
+
     input_guard = guard_user_input(question)
 
     if not input_guard.safe:
@@ -318,10 +328,6 @@ def stream_react_loop(
         return
 
     question = input_guard.text
-
-    retriever = retriever or get_retriever()
-    registry = registry or build_default_registry()
-    tools = registry.to_openai_tools()
 
     messages = [
         {"role": "system", "content": system_prompt},

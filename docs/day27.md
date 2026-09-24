@@ -103,9 +103,9 @@ JSONL 则是每行一个 JSON 对象：
 
 ## 4. 项目闭环实际流程
 
-```
+```mermaid
 flowchart TD
-    A[浏览器请求 /agent/stream] --> B[FastAPI 生成 request_id]
+    A["浏览器请求 /agent/stream"] --> B[FastAPI 生成 request_id]
     B --> C[创建 stream_react_loop 生成器]
     C --> D[trace_stream 包装 Agent 流]
     D --> E[ObservabilityStore.start_trace]
@@ -116,7 +116,7 @@ flowchart TD
     I --> J[原样 yield 给客户端]
     J --> G
     G -->|流结束| K[trace 保存在内存中]
-    K --> L[可通过 /agent/traces/{trace_id} 查询]
+    K --> L["可通过 /agent/traces/{trace_id} 查询"]
 ```
 
 实际调用顺序：

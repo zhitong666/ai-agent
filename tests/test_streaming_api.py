@@ -3,11 +3,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app import agent, streaming
+from app.auth_security import create_access_token
 from app.main import app
 from app.memory import SessionStore
+from app.quota import QuotaDecision
 
 
 client = TestClient(app)
+
+
+def auth_headers():
+    token = create_access_token(
+        "test-user",
+        ["user"],
+        "default",
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 class FakeRetriever:
@@ -79,6 +90,7 @@ def test_chat_stream_endpoint_returns_sse():
         client,
         session_id,
         question,
+        scene="job",
         retriever=None,
         semaphore=None,
         session_store=None,
@@ -89,15 +101,23 @@ def test_chat_stream_endpoint_returns_sse():
     app.state.session_store = MagicMock()
     app.state.rate_limiter = MagicMock()
     app.state.rate_limiter.allow = AsyncMock(return_value=True)
+    app.state.quota_service = MagicMock()
+    app.state.quota_service.check_request = AsyncMock(
+        return_value=QuotaDecision(allowed=True)
+    )
+    app.state.quota_service.consume_tokens = AsyncMock(
+        return_value=QuotaDecision(allowed=True)
+    )
 
     with patch(
         "app.main.stream_answer_question_async",
         side_effect=fake_stream,
     ):
-        response = client.post(
-            "/chat/stream",
-            json={"session_id": "s1", "question": "你好"},
-        )
+            response = client.post(
+                "/chat/stream",
+                json={"session_id": "s1", "question": "你好"},
+                headers=auth_headers(),
+            )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -109,10 +129,12 @@ def test_chat_stream_endpoint_returns_sse():
 def test_chat_stream_rejects_empty_question():
     app.state.rate_limiter = MagicMock()
     app.state.rate_limiter.allow = AsyncMock(return_value=False)
+    app.state.quota_service = MagicMock()
 
     response = client.post(
         "/chat/stream",
         json={"session_id": "s1", "question": ""},
+        headers=auth_headers(),
     )
 
     assert response.status_code == 422

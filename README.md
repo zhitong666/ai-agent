@@ -1696,3 +1696,1187 @@ docker compose up -d --build
 7. 主动讲一个最有价值的踩坑或设计决策，并说明如何用测试验证。
 
 面试时尽量用“问题 -> 方案 -> 取舍 -> 验证”的结构回答，而不是只背概念。
+
+---
+
+## 24. 追加专题：Agent 模式选型、LangChain 生态、多租户与 LangGraph 深度解析
+
+本节是后续补充内容，只追加在原 README 末尾，不改变前面章节。
+
+### 24.1 单 ReAct Agent 和 Plan-and-Execute 是否冲突
+
+它们不是竞品，而是 Agent 的两种控制流策略。
+
+```text
+ReAct：
+  每一步都让模型根据当前观察结果动态决定下一步。
+
+Plan-and-Execute：
+  先让模型生成完整计划，再由执行器按计划执行。
+```
+
+两者可以解决同一类“用户提问后由 Agent 完成任务”的问题，但侧重点不同。
+
+| 维度 | ReAct | Plan-and-Execute |
+|---|---|---|
+| 决策时机 | 每步动态决策 | 开始前集中规划 |
+| 灵活性 | 高，能根据观察调整 | 中等，计划生成后相对固定 |
+| 轨迹清晰度 | 有步骤，但路径可能较发散 | 计划明确，步骤和依赖清楚 |
+| 实现复杂度 | 较低 | 较高，需要计划校验和状态管理 |
+| 审计能力 | 一般 | 更好 |
+| LLM 调用次数 | 可能更多，逐步推理 | 规划一次，执行阶段按计划推进 |
+| 适合任务 | 探索性强、工具少、路径不固定 | 可拆解、步骤明确、需要稳定执行 |
+
+实际选择：
+
+- 工具较少、问题开放、需要根据检索结果临时判断下一步时，ReAct 更自然。
+- 任务可以拆成固定步骤、有依赖关系、需要审计和恢复时，Plan-and-Execute 更合适。
+- 两者也可以组合：先用 Plan 生成步骤，再在执行某个步骤时允许局部 ReAct。
+
+项目中的演进不是“ReAct 被 Plan 替代”，而是增加了新的编排能力，让不同任务可以使用不同模式。
+
+### 24.2 Supervisor 和 Plan-and-Execute 的关系
+
+Supervisor 和 Plan-and-Execute 也不是同一层概念。
+
+```text
+Supervisor：
+  负责“把任务交给谁”。
+
+Plan-and-Execute：
+  负责“拿到任务后怎么拆、怎么做”。
+```
+
+更准确地说：
+
+- Supervisor 是多 Agent 的路由与协调层。
+- Plan-and-Execute 是单个任务内部的执行策略。
+- Worker 可以是 knowledge、jd_analysis，也可以是一个内部使用 Plan-and-Execute 的复杂 Agent。
+
+真实业务选择：
+
+| 场景 | 更适合 |
+|---|---|
+| 明确只有一种任务，例如只做知识库问答 | 单个 ReAct 或 Plan-and-Execute |
+| 有多种异构任务，例如客服、工单、订单、知识库 | Supervisor + Worker |
+| 单个任务较复杂，需要稳定拆解和追踪 | Worker 内部使用 Plan-and-Execute |
+| 需要跨领域交接，例如知识库 Worker 把 JD 交给分析 Worker | Supervisor + Handoff |
+| 需要审计、人工确认、断点恢复 | LangGraph 状态图 |
+
+推荐组合：
+
+```text
+Supervisor 选择 Worker
+  -> Worker 使用 Plan-and-Execute 拆解自身任务
+  -> 必要时通过 Handoff 交给另一个 Worker
+  -> LangGraph 负责 checkpoint、恢复和状态追踪
+```
+
+### 24.3 LangChain 生态中除了 LangGraph 还有什么
+
+LangChain 不是单一库，而是一组工具和框架。
+
+| 工具或框架 | 主要解决什么问题 |
+|---|---|
+| LangChain Core | 基础抽象，例如 Runnable、消息、Prompt、工具、输出解析器 |
+| LangChain / LangChain Community | 提供大量模型、文档加载器、向量库、工具、Retriever 的集成 |
+| LCEL | LangChain Expression Language，用管道方式组合 Runnable |
+| LangGraph | 用图结构实现有状态、可恢复、可分支的多步 Agent |
+| LangSmith | 开发、调试、评估、监控 LLM 应用和 Agent Trace |
+| LangServe | 把 LangChain Runnable 快速部署成 REST API |
+| LangChain Hub | 分享、查找、复用 Prompt 模板 |
+| LangChain Templates | 常见场景的可复用项目模板 |
+| LangChain CLI | 创建、管理、运行 LangChain 项目和模板 |
+
+用途区分：
+
+- 写 Prompt、调模型、加载文档、做简单 RAG：LangChain Core + Community。
+- 需要多步 Agent、分支、循环、checkpoint：LangGraph。
+- 需要线上调试、评估、观测：LangSmith。
+- 需要把 Agent 快速发布为服务：LangServe。
+
+本项目没有重度依赖 LangChain 高层封装，而是主要使用 LangGraph 做状态图和 checkpoint，同时保留更直接的 OpenAI SDK 调用。这样能更清楚地理解底层发生什么。
+
+### 24.4 SaaS、IaaS 和多租户隔离
+
+#### 24.4.1  IaaS
+
+常见云服务分层：
+
+```text
+IaaS：基础设施即服务
+PaaS：平台即服务
+SaaS：软件即服务
+```
+
+| 层 | 含义 | 产品示例 |
+|---|---|---|
+| IaaS | 提供服务器、网络、存储等基础设施 | AWS EC2、阿里云 ECS、腾讯云 CVM |
+| PaaS | 提供应用运行平台、数据库、中间件 | Heroku、Vercel、阿里云函数计算 |
+| SaaS | 直接提供可用的软件服务 | Salesforce、Slack、Notion、Google Workspace |
+
+#### 24.4.2 SaaS 多租户是什么
+
+多租户指的是：
+
+```text
+一个应用实例同时服务多个客户或组织。
+每个客户或组织称为一个 tenant。
+不同 tenant 的数据在逻辑上隔离，彼此不能访问。
+```
+
+类比：
+
+- 一栋写字楼有多家公司。
+- 大楼、电梯、前台是共享的。
+- 每家公司有自己的门禁和办公室。
+
+在软件中，一个 SaaS 服务可能服务多家公司：
+
+```text
+tenant-a：A 公司用户和数据
+tenant-b：B 公司用户和数据
+```
+
+#### 24.4.3 为什么要租户隔离
+
+原因：
+
+- 防止 A 公司读到 B 公司数据。
+- 满足安全和合规要求。
+- 避免一个租户的错误影响其他租户。
+- 方便按租户统计用量、计费和配置权限。
+- 支持不同租户有不同角色、配置和资源额度。
+
+#### 24.4.4 常见的隔离级别
+
+| 隔离级别 | 实现方式 | 成本 | 安全性 |
+|---|---|---|---|
+| 字段级隔离 | 每条记录加 `tenant_id` | 低 | 中 |
+| Schema 隔离 | 每个租户独立数据库 schema | 中 | 较高 |
+| 数据库隔离 | 每个租户独立数据库 | 高 | 高 |
+| 集群或实例隔离 | 每个租户独立部署 | 最高 | 最高 |
+
+本项目的租户隔离主要是字段级或 namespace 级：
+
+```text
+JWT 带 tenant_id
+任务 payload 带 tenant_id
+共享记忆 namespace 使用 tenant:{tenant_id}:run:{run_id}
+```
+
+#### 24.4.5 实际互联网产品
+
+SaaS 多租户产品：
+
+- Salesforce
+- Slack
+- Notion
+- Shopify
+- 飞书
+- 钉钉
+- Google Workspace
+- 企业微信
+
+IaaS 产品：
+
+- AWS
+- 阿里云
+- 腾讯云
+- Azure
+
+在这些产品中，你注册一个组织或账号，通常就是一个 tenant。
+
+### 24.5 `app/supervisor_graph.py` 逐段梳理与运行机制
+
+#### 24.5.1 文件整体目标
+
+`app/supervisor_graph.py` 负责把 Supervisor、Worker 和 Handoff 组织成 LangGraph 状态图，并增加生产化能力：
+
+- checkpoint
+- run 状态查询
+- 中断和恢复
+- 幂等
+- 租户隔离
+- 超时
+- 共享记忆
+
+#### 24.5.2 状态结构
+
+```python
+class SupervisorGraphState(TypedDict, total=False):
+    question: str
+    current_decision: dict
+    worker_result: dict
+    handoffs: list[dict]
+    handoff_count: int
+    result: dict
+```
+
+解释：
+
+- `question`：用户问题。
+- `current_decision`：Supervisor 当前做出的路由决策。
+- `worker_result`：Worker 当前执行结果。
+- `handoffs`：已经发生的交接记录。
+- `handoff_count`：交接次数，用于防止无限交接。
+- `result`：最终 `SupervisorResult`。
+
+`total=False` 表示字段不要求全部出现，适合图执行过程中状态逐步更新。
+
+#### 24.5.3 四个节点
+
+`supervisor_node`：
+
+```text
+读取 state["question"]
+  -> decide_worker 调用 LLM 做路由
+  -> 把 SupervisorDecision 转成 dict
+  -> 返回 {"current_decision": ..., "handoff_count": ...}
+```
+
+`worker_node`：
+
+```text
+从 current_decision 恢复 SupervisorDecision
+  -> 从 WorkerRegistry 找到 Worker
+  -> 不存在则构造 failed WorkerResult
+  -> 存在则调用 worker.run()
+  -> 返回 {"worker_result": ...}
+```
+
+`handoff_node`：
+
+```text
+从 current_decision 和 worker_result 构造 next_decision
+  -> 追加 handoff 记录
+  -> handoff_count 加 1
+```
+
+`finalize_node`：
+
+```text
+根据 worker_result.status 生成最终 SupervisorResult
+  -> completed 时返回答案
+  -> handoff 且超出限制时返回失败
+  -> 其他错误状态返回失败
+```
+
+#### 24.5.4 条件分支
+
+`build_should_handoff(max_handoffs)` 返回一个条件函数：
+
+```text
+如果 worker_result.status == "handoff"
+并且 handoff 对象存在
+并且 handoff_count < max_handoffs
+  -> 返回 "handoff"
+否则
+  -> 返回 "finalize"
+```
+
+#### 24.5.5 StateGraph 是什么
+
+`StateGraph` 来自 `langgraph.graph`，用于描述一个有状态的计算图。
+
+```python
+graph = StateGraph(SupervisorGraphState)
+```
+
+这里传入 `SupervisorGraphState`，表示图的状态结构。
+
+每个节点接收当前 state，返回部分状态更新。LangGraph 会把节点返回的 dict 合并进当前 state。
+
+常用方法：
+
+| 方法 | 作用 |
+|---|---|
+| `add_node(name, action)` | 注册一个节点，name 是节点名，action 是函数 |
+| `set_entry_point(name)` | 指定起始节点 |
+| `add_edge(from_node, to_node)` | 添加固定边 |
+| `add_conditional_edges(source, condition, mapping)` | 根据条件函数返回值选择下一个节点 |
+| `compile(...)` | 把图编译成可执行对象 |
+
+`compile()` 常用参数：
+
+- `checkpointer`：状态持久化器，例如 `SqliteSaver`。
+- `interrupt_before`：指定在这些节点前暂停。
+
+编译后的 graph 有：
+
+- `invoke(state, config)`：同步执行一次。
+- `stream(state, config, stream_mode=...)`：流式返回节点更新。
+- `get_state(config)`：读取 checkpoint 状态。
+
+本项目配置：
+
+```python
+graph.set_entry_point("supervisor")
+graph.add_edge("supervisor", "worker")
+graph.add_conditional_edges("worker", should_handoff, {
+    "handoff": "handoff",
+    "finalize": "finalize",
+})
+graph.add_edge("handoff", "worker")
+graph.add_edge("finalize", END)
+```
+
+完整流程：
+
+```mermaid
+flowchart TD
+    Start[输入 question] --> Supervisor[supervisor]
+    Supervisor -->|current_decision| Worker[worker]
+    Worker -->|worker_result| Check{需要 handoff?}
+    Check -->|是| Handoff[handoff]
+    Check -->|否| Finalize[finalize]
+    Handoff -->|next_decision| Worker
+    Finalize -->|result| End[END]
+```
+
+#### 24.5.6 Checkpoint 和 thread_id
+
+```python
+def _run_config(run_id: str) -> dict:
+    return {"configurable": {"thread_id": run_id}}
+```
+
+LangGraph 使用 `thread_id` 作为 checkpoint 的标识。
+
+同一个 `thread_id` 可以：
+
+- 写入状态。
+- 读取状态。
+- 在中断后继续执行。
+
+项目使用：
+
+```python
+DEFAULT_CHECKPOINTER = get_default_checkpointer()
+```
+
+底层是 `SqliteSaver`，保存到 `data/langgraph_checkpoints.sqlite`。
+
+#### 24.5.7 幂等
+
+幂等表示同一个请求执行一次和多次，业务结果应该一致。
+
+`start_graph_run()` 中：
+
+```python
+if request_id and memory_store:
+    idempotency_key = _idempotency_namespace(tenant_id)
+    existing = memory_store.get(idempotency_key, request_id)
+
+    if existing and existing.value.get("run_id"):
+        run = get_graph_run(...)
+        run.request_id = request_id
+        return run
+```
+
+流程：
+
+```text
+第一次收到 request_id
+  -> 创建 run_id
+  -> 保存 request_id -> run_id
+
+再次收到同一个 request_id
+  -> 直接返回已有 run
+```
+
+这能处理：
+
+- 网络超时后客户端重试。
+- 用户重复点击。
+- 消息队列重复投递。
+
+#### 24.5.8 租户隔离
+
+```python
+def _run_namespace(tenant_id: str, run_id: str) -> str:
+    return f"tenant:{tenant_id}:run:{run_id}"
+
+
+def _idempotency_namespace(tenant_id: str) -> str:
+    return f"tenant:{tenant_id}:idempotency"
+```
+
+不同 tenant 使用不同 namespace，即使 `run_id` 相同也不会互相覆盖。
+
+#### 24.5.9 超时
+
+`_invoke_with_timeout()`：
+
+```python
+if timeout_seconds is None:
+    return graph.invoke(input_state, config=config)
+
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+future = executor.submit(graph.invoke, input_state, config=config)
+return future.result(timeout=timeout_seconds)
+```
+
+解释：
+
+- `graph.invoke()` 在这个场景中是同步阻塞调用。
+- 如果直接在主线程执行，可能无法中途取消。
+- 把它提交到线程池，主线程通过 `future.result(timeout=...)` 限制等待时间。
+- 超时后抛 `TimeoutError`，调用方把 run 标记为失败。
+
+注意：
+
+- 这里每个带超时的调用会创建一个 `max_workers=1` 的线程池。
+- 它适合当前项目说明超时原理，但在高并发生产系统中，通常应该复用全局线程池或任务队列，避免线程数量失控。
+
+#### 24.5.10 进程、线程、协程和多用户请求
+
+```text
+进程：
+  操作系统分配资源的基本单位，隔离最强。
+
+线程：
+  进程内部并发执行的单位，共享进程内存。
+
+协程：
+  用户态协作式并发，在单线程内通过 await 让出执行权。
+```
+
+类比：
+
+```text
+进程 = 多个独立办公室
+线程 = 同一个办公室里的多个员工
+协程 = 一个员工在多个任务之间快速切换
+```
+
+在 FastAPI 线上场景：
+
+- FastAPI 使用事件循环处理大量 I/O 请求。
+- `async def` 路由遇到网络 I/O 时可以让出控制权。
+- 如果遇到 CPU 密集或阻塞任务，应避免阻塞事件循环。
+- `ThreadPoolExecutor` 把阻塞调用放进线程执行。
+- 如果任务非常重，可以使用独立 Worker 进程或任务队列。
+
+多用户请求发生时：
+
+```text
+用户 A 请求 -> 创建 run A
+用户 B 请求 -> 创建 run B
+```
+
+LangGraph 通过 `thread_id` 区分不同 run，通过共享记忆的 namespace 区分不同租户。
+
+真正的生产系统还需要：
+
+- 全局并发限制。
+- 分布式锁。
+- 请求超时。
+- 队列和 Worker。
+- 数据库连接池。
+- Redis 限流。
+- 监控和告警。
+
+当前代码是一个可理解的单机实现，面试时可以主动说明这些生产演进点。
+
+---
+
+## 25. MCP 概念、整体流程与相关概念关系补充
+
+### 25.1 MCP 是什么
+
+MCP 是 Model Context Protocol，模型上下文协议。
+
+它是一套标准化协议，用来解决：
+
+```text
+大模型或 Agent 如何连接外部工具、资源、数据源
+```
+
+不要把 MCP 理解成 Agent 框架。它更像一个“工具连接的 USB-C 接口”。
+
+| 概念 | 类比 |
+|---|---|
+| MCP | USB-C 协议 |
+| MCP Server | 支持 USB-C 的外设 |
+| MCP Client / Host | 电脑、手机或 Agent |
+| Tool / Resource / Prompt | 外设提供的能力 |
+
+MCP 解决的问题是“连接标准”，不是“Agent 怎么推理、怎么循环、怎么规划”。
+
+### 25.2 MCP 是不是 Agent 框架
+
+不是。
+
+Agent 框架通常负责：
+
+- Agent 循环。
+- 状态管理。
+- 任务规划。
+- 工具编排。
+- 多 Agent 协作。
+- 记忆和 checkpoint。
+
+MCP 只负责：
+
+- 定义客户端和服务端如何通信。
+- 暴露工具、资源和 Prompt。
+- 让模型或 Agent 能发现和调用外部能力。
+
+所以：
+
+```text
+LangGraph = Agent 编排框架
+MCP = 外部工具和数据源的连接协议
+```
+
+两者可以一起用：
+
+```text
+LangGraph 负责“怎么思考和编排”
+MCP 负责“怎么连接外部能力”
+```
+
+### 25.3 MCP 的核心角色
+
+```text
+MCP Host：
+  运行 Agent 或应用的一方，例如 Claude Desktop、IDE、FastAPI 服务。
+
+MCP Client：
+  代表 Host 与某个 MCP Server 建立连接。
+
+MCP Server：
+  暴露具体工具、资源、Prompt 的一方。
+```
+
+一次标准交互：
+
+```text
+Host 启动 Client
+  -> Client 连接 Server
+  -> Client 初始化会话
+  -> Client 获取工具列表
+  -> Agent 决定调用某个工具
+  -> Client 发起 call_tool
+  -> Server 执行工具
+  -> Server 返回结果
+  -> Client 把结果交给 Agent
+```
+
+### 25.4 MCP 整体流程图
+
+```mermaid
+flowchart TD
+    Host[MCP Host / Agent 应用] --> Client[MCP Client]
+    Client -->|initialize| Server[MCP Server]
+    Client -->|list_tools| Server
+    Client -->|call_tool| Server
+    Server --> Tools[MCP Tools]
+    Server --> Resources[MCP Resources]
+    Server --> Prompts[MCP Prompts]
+    Tools --> Result[结构化结果]
+    Resources --> Result
+    Prompts --> Result
+    Result --> Client
+    Client --> Host
+```
+
+### 25.5 项目中的 MCP 实现
+
+当前项目里：
+
+| 文件 | 角色 |
+|---|---|
+| `app/mcp_server.py` | MCP Server，注册知识库工具、资源和 Prompt |
+| `app/mcp_client.py` | MCP Client，负责连接、发现和调用 |
+| `app/mcp_agent_bridge.py` | 把 MCP 工具转成 OpenAI Function Schema，并加安全和权限 |
+| `app/mcp_agent.py` | 让 ReAct Agent 使用 MCP 工具 |
+
+具体能力：
+
+- Tool：`search_knowledge`、`list_knowledge_titles`、`get_knowledge_document`
+- Resource：`knowledge://titles`、`knowledge://docs/{title}`
+- Prompt：`analyze_jd`
+
+### 25.6 MCP 和 Function Calling 的关系
+
+两者不是同一个层级。
+
+```text
+Function Calling：
+  模型返回“我想调用什么工具、参数是什么”。
+
+MCP：
+  客户端如何连接服务端、如何发现工具、如何传输调用和结果。
+```
+
+可以理解为：
+
+- Function Calling 是模型侧协议。
+- MCP 是工具系统侧的通信协议。
+- 项目中的 `mcp_agent_bridge.py` 会把 MCP 工具转换成 OpenAI Function Schema，让模型能够理解这些工具。
+
+### 25.7 MCP 和 Tool 的关系
+
+Tool 是一个具体能力，MCP 是暴露这些能力的标准方式。
+
+```text
+Tool = 功能本身，例如查询天气、检索知识库。
+MCP = 描述这个 Tool 如何被远程发现和调用。
+```
+
+一个 MCP Server 可以有多个 Tool：
+
+```text
+MCP Server
+  -> Tool A
+  -> Tool B
+  -> Resource C
+  -> Prompt D
+```
+
+### 25.8 MCP 和 ReAct 的关系
+
+ReAct 是 Agent 的推理与行动循环：
+
+```text
+Reason
+  -> Act
+  -> Observe
+  -> Reason
+```
+
+MCP 只是 ReAct 在 Act 阶段可能调用的一种工具来源。
+
+```text
+ReAct Agent
+  -> 决定调用 search_knowledge
+  -> MCP Client 发起调用
+  -> MCP Server 返回结果
+  -> Agent 拿到 Observation
+  -> 继续推理
+```
+
+因此它们可以协作：
+
+- ReAct 决定“做什么”。
+- MCP 解决“怎么连接外部工具”。
+
+### 25.9 四者分层关系
+
+```text
+Agent 层：
+  ReAct / Plan-and-Execute / LangGraph
+
+工具注册层：
+  ToolRegistry / MCP Tool Registry
+
+模型调用层：
+  Function Calling
+
+外部能力连接层：
+  MCP Client / MCP Server
+```
+
+| 概念 | 主要问题 | 层次 |
+|---|---|---|
+| ReAct | Agent 如何循环推理和执行 | Agent 编排 |
+| Tool | 一个可执行能力是什么 | 工具抽象 |
+| Function Calling | 模型如何表达工具调用 | 模型协议 |
+| MCP | 外部工具如何被标准化连接 | 工具互联协议 |
+
+### 25.10 实际业务场景分别解决什么问题
+
+#### ReAct
+
+适合：
+
+- 用户问题开放。
+- 工具数量不多。
+- 需要根据中间结果动态决定下一步。
+- 快速构建单个 Agent。
+
+例如：
+
+```text
+用户问“我适合补什么技能”
+  -> Agent 先查知识库
+  -> 再根据结果决定是否继续查
+  -> 最后生成答案
+```
+
+#### Tool
+
+适合：
+
+- 把业务能力封装成可调用单元。
+- 统一参数、权限、错误处理和审计。
+
+例如：
+
+- `search_knowledge`
+- `apply_job`
+- `create_ticket`
+- `send_email`
+
+#### Function Calling
+
+适合：
+
+- 让模型结构化地选择工具。
+- 让模型按 JSON Schema 输出参数。
+- 把自然语言转成可执行动作。
+
+例如：
+
+```text
+用户说“帮我查一下 FastAPI”
+  -> 模型调用 search_knowledge(query="FastAPI")
+```
+
+#### MCP
+
+适合：
+
+- 企业里有多个内部服务，希望统一接入 Agent。
+- 不同团队提供不同工具，希望遵守同一套协议。
+- 希望工具可以被多个 Agent、IDE、平台复用。
+- 希望动态发现工具，而不是把工具写死在 Agent 代码里。
+
+例如：
+
+```text
+企业 Agent 平台统一接入：
+  - 工单系统 MCP Server
+  - CRM MCP Server
+  - 知识库 MCP Server
+  - 数据库查询 MCP Server
+```
+
+Agent 不需要为每个系统写专门代码，只需要通过 MCP Client 发现和调用。
+
+### 25.11 一句话总结
+
+```text
+ReAct 是思考方式。
+Tool 是能力单元。
+Function Calling 是模型表达调用的方式。
+MCP 是让外部能力可以被标准化接入的协议。
+```
+
+面试时可以强调：MCP 不是 Agent 框架，而是连接层协议；它和 Agent 框架是互补关系，不是替代关系。
+
+---
+
+## 26. 数据库、连接池、硬件资源与线上并发专题
+
+### 26.1 异步连接池是什么，业务中负责什么
+
+#### 26.1.1 为什么需要连接池
+
+数据库连接不是免费的。每次建立连接通常要：
+
+```text
+建立 TCP 连接
+  -> 数据库认证
+  -> 分配服务端资源
+  -> 执行 SQL
+  -> 关闭连接
+```
+
+如果每个请求都新建连接，高并发时会出现：
+
+- 连接建立延迟大。
+- CPU 和内存被反复创建连接消耗。
+- 数据库连接数很快达到上限。
+- 请求排队甚至失败。
+
+连接池的做法是：
+
+```text
+提前维护一批可复用连接
+  -> 请求来了借用一个连接
+  -> 用完归还
+  -> 其他请求继续使用
+```
+
+类比：
+
+```text
+每次新建连接 = 每接待一个客户就新开一家门店
+连接池 = 一家门店里固定安排若干收银台，轮流服务客户
+```
+
+#### 26.1.2 项目中的异步连接池
+
+`app/postgres.py`：
+
+```python
+AsyncConnectionPool(
+    conninfo=dsn,
+    min_size=1,
+    max_size=10,
+    open=False,
+)
+```
+
+解释：
+
+- `AsyncConnectionPool`：异步连接池。
+- `min_size`：启动后最少保持的连接数。
+- `max_size`：最多允许的连接数。
+- `open=False`：先创建配置，再显式 `await pool.open()`。
+
+`min_size=1` 表示至少有一个连接可供快速响应。
+
+`max_size=10` 表示最多同时借出 10 个连接，超过后请求需要等待连接归还。
+
+#### 26.1.3 连接池在项目中的位置
+
+```mermaid
+flowchart LR
+    Client[客户端] --> FastAPI[FastAPI]
+    FastAPI --> Agent[async_agent]
+    Agent --> Session[PostgresSessionStore]
+    Session --> Pool[AsyncConnectionPool]
+    Pool --> PG[PostgreSQL]
+    PG --> Table[chat_messages 表]
+```
+
+#### 26.1.4 一次聊天请求如何使用连接池
+
+```mermaid
+flowchart TD
+    A[POST /chat] --> B[从连接池借用连接]
+    B --> C[读取历史消息]
+    C --> D[RAG 检索]
+    D --> E[调用 LLM]
+    E --> F[开启事务]
+    F --> G[写入 user 消息]
+    G --> H[写入 assistant 消息]
+    H --> I[commit]
+    I --> J[归还连接]
+    J --> K[返回结果]
+```
+
+如果事务失败：
+
+```text
+写入 user 消息
+  -> 写入 assistant 消息失败
+  -> rollback
+  -> 两条消息都不保存
+```
+
+这保证不会出现“只有用户问题，没有助手回答”的半成品状态。
+
+#### 26.1.5 实际业务负责什么
+
+连接池负责：
+
+- 降低数据库连接成本。
+- 提高请求响应速度。
+- 限制数据库最大连接数。
+- 支持多个请求复用连接。
+- 为异步 FastAPI 提供异步数据库访问。
+
+### 26.2 内存与磁盘的区别，以及内存、磁盘、CPU、GPU 的关系
+
+#### 26.2.1 数据写入内存
+
+```text
+内存：
+  速度快
+  容量相对小
+  断电或进程退出后数据消失
+```
+
+项目早期 `SessionStore` 使用 Python 字典保存聊天消息，就是内存数据。
+
+优点：
+
+- 读写极快。
+- 不需要网络和磁盘 I/O。
+
+缺点：
+
+- 服务重启丢失。
+- 多进程部署时无法共享。
+- 用户可能被负载均衡到不同进程，导致历史不一致。
+
+#### 26.2.2 数据写入磁盘
+
+```text
+磁盘：
+  速度比内存慢
+  容量更大
+  断电后数据仍然保留
+```
+
+PostgreSQL、SQLite、向量库的持久化文件最终都会写入磁盘。
+
+优点：
+
+- 数据持久化。
+- 适合长期保存和大数据量。
+
+缺点：
+
+- 读写延迟更高。
+- 查询需要索引、缓存和数据库优化。
+
+#### 26.2.3 内存和磁盘的关系
+
+```text
+CPU 需要数据时，优先找内存。
+内存没有时，从磁盘读取。
+磁盘数据进入内存后，CPU 才能快速计算。
+```
+
+类比：
+
+```text
+内存 = 办公桌，能快速拿到文件
+磁盘 = 文件柜，容量大，但拿文件慢
+```
+
+#### 26.2.4 CPU 负责什么
+
+CPU 适合：
+
+- 通用逻辑。
+- 条件判断。
+- 数据库查询。
+- HTTP 处理。
+- 普通 Python 代码。
+
+影响：
+
+- CPU 核数影响可同时执行的计算任务。
+- CPU 使用率过高会导致请求处理变慢。
+
+#### 26.2.5 GPU 负责什么
+
+GPU 适合：
+
+- 大量并行矩阵运算。
+- 深度学习模型推理。
+- Embedding 模型计算。
+- 大模型训练。
+
+影响：
+
+- 本地运行 Embedding 或 LLM 时，GPU 显存和算力直接影响吞吐和延迟。
+- 没有 GPU 时通常使用远程模型 API，例如 DeepSeek。
+
+#### 26.2.6 各资源配置在实际业务中影响什么
+
+| 资源 | 主要影响 |
+|---|---|
+| 内存 | 缓存大小、连接数、Embedding 模型加载、进程和线程数量 |
+| 磁盘 | 数据库容量、向量库持久化、日志、备份、镜像 |
+| CPU | 请求逻辑处理、数据库查询、JSON 解析、普通计算 |
+| GPU | 本地模型推理、Embedding、大规模并行计算 |
+
+例如：
+
+- 内存不足：数据库连接池小、缓存命中低、本地 Embedding 加载失败。
+- 磁盘不足：PostgreSQL 无法写入、Docker 构建失败、日志无法落盘。
+- CPU 不足：请求处理慢、连接池资源竞争。
+- GPU 显存不足：本地模型无法加载，必须改用远程 API。
+
+项目中低内存服务器采用远程 Embedding，就是为了减少内存和 CPU 压力。
+
+### 26.3 PostgreSQL 和其他数据库类型
+
+#### 26.3.1 PostgreSQL 属于关系型数据库
+
+关系型数据库把数据组织成：
+
+```text
+Database
+  -> Table
+  -> Row
+  -> Column
+```
+
+适合：
+
+- 强一致事务。
+- 结构化数据。
+- 复杂 SQL 查询。
+- 用户、订单、消息、权限等业务。
+
+常见产品：
+
+- PostgreSQL
+- MySQL
+- SQLite
+- SQL Server
+
+#### 26.3.2 其他数据库类型
+
+| 类型 | 代表产品 | 解决什么问题 |
+|---|---|---|
+| 关系型数据库 | PostgreSQL、MySQL | 结构化数据、事务、复杂关系查询 |
+| KV 数据库 | Redis | 高速缓存、限流、队列、会话 |
+| 文档数据库 | MongoDB | 半结构化 JSON 文档、快速迭代 |
+| 向量数据库 | Chroma、Qdrant、Milvus、pgvector | Embedding 相似度检索 |
+| 搜索数据库 | Elasticsearch | 全文搜索、日志分析 |
+| 时序数据库 | InfluxDB、TimescaleDB | 监控指标、IoT、按时间聚合 |
+| 图数据库 | Neo4j | 关系网络、推荐、社交图谱 |
+| 对象存储 | S3、OSS、MinIO | 文件、图片、视频、模型产物 |
+
+#### 26.3.3 本项目如何组合
+
+```text
+PostgreSQL：
+  用户、聊天消息、会话持久化。
+
+Redis：
+  缓存、限流、任务状态、arq 队列。
+
+Chroma / Qdrant：
+  Embedding 向量检索。
+
+SQLite：
+  LangGraph checkpoint、多 Agent 共享记忆。
+```
+
+这说明真实系统通常不是只选一个数据库，而是根据数据形态组合使用。
+
+### 26.4 请求并发量、请求数、用户、租户、namespace、进程、内存等资源的关系
+
+#### 26.4.1 先区分几个词
+
+```text
+请求数：
+  一段时间内总共来了多少请求。
+
+并发量：
+  同一时刻正在处理中的请求数量。
+
+用户：
+  使用系统的真实人或账号。
+
+租户：
+  使用同一 SaaS 服务的组织或业务空间。
+
+namespace：
+  逻辑隔离空间，用来把不同租户、不同 run 的数据分开。
+
+进程：
+  操作系统分配资源的独立单位。
+
+线程：
+  进程内并发执行的单位。
+
+协程：
+  单线程内通过 await 切换的轻量并发单元。
+```
+
+#### 26.4.2 一个请求从进入到消耗资源
+
+```mermaid
+flowchart TD
+    User[用户] --> Tenant[租户]
+    Tenant --> Request[请求]
+    Request --> Concurrency[并发中的请求]
+    Concurrency --> API[FastAPI 事件循环]
+    API --> Auth[认证与租户识别]
+    Auth --> Namespace[选择 namespace]
+    Namespace --> Service[业务处理]
+    Service --> Resource{资源竞争}
+    Resource --> CPU[CPU]
+    Resource --> Memory[内存]
+    Resource --> Pool[数据库连接池]
+    Resource --> Redis[Redis]
+    Resource --> LLM[LLM API]
+    Resource --> Disk[磁盘]
+```
+
+关系解释：
+
+```text
+用户属于租户。
+一个用户可以发起很多请求。
+请求不一定会同时到达。
+并发量只看同一时刻正在处理的请求。
+租户和 namespace 负责逻辑隔离。
+进程、线程、协程负责并发执行。
+内存、CPU、连接池、磁盘决定系统能承载多少并发。
+```
+
+#### 26.4.3 多租户 namespace 示例
+
+```text
+tenant-a:
+  tenant:tenant-a:run:run-1
+  tenant:tenant-a:run:run-2
+
+tenant-b:
+  tenant:tenant-b:run:run-1
+  tenant:tenant-b:run:run-2
+```
+
+即使 `run-1` 相同，namespace 前缀不同，也不会互相读取。
+
+#### 26.4.4 进程、线程、协程和资源的关系
+
+```text
+进程：
+  隔离最强，内存不共享，适合 Worker 或重计算。
+
+线程：
+  共享进程内存，适合阻塞 I/O 或需要限制等待时间的场景。
+
+协程：
+  内存占用低，切换快，适合大量网络 I/O。
+```
+
+FastAPI 中：
+
+- 普通 `async def` 路由运行在事件循环中。
+- 网络 I/O 通过 `await` 让出控制权。
+- 阻塞同步任务通过线程池执行。
+- 重任务通过独立 Worker 进程执行。
+
+#### 26.4.5 高并发生产系统如何处理
+
+```mermaid
+flowchart LR
+    Users[多用户] --> Gateway[网关 / Nginx]
+    Gateway --> Rate[限流]
+    Rate --> API[多实例 FastAPI]
+    API --> Queue[任务队列]
+    API --> Cache[Redis 缓存]
+    API --> DB[PostgreSQL 连接池]
+    Queue --> Worker[后台 Worker]
+    Worker --> DB
+    API --> Vector[向量数据库]
+    API --> LLM[外部 LLM API]
+```
+
+生产处理思路：
+
+1. 用 Nginx 或 API Gateway 做入口限流。
+2. 用 Redis 做会话缓存和分布式限流。
+3. 用连接池限制数据库并发。
+4. 用队列承接耗时任务，避免 API 长时间等待。
+5. 用多实例横向扩展，由负载均衡分发请求。
+6. 用 namespace 或 tenant_id 做数据隔离。
+7. 用监控指标观察请求量、并发、CPU、内存、连接数和错误率。
+8. 用熔断、降级、超时和背压防止依赖故障拖垮整个系统。
+
+#### 26.4.6 面试表达公式
+
+```text
+用户 -> 租户 -> 请求 -> 并发 -> 资源
+
+并发高时：
+  先限流和缓存
+  再用连接池、队列、异步化
+  再横向扩展进程或实例
+  同时保证租户隔离、幂等和可观测性
+```

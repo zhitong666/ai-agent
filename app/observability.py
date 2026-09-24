@@ -7,6 +7,7 @@ from opentelemetry import trace
 from pydantic import BaseModel, Field
 
 from app.sensitive_data import mask_value
+from app.streaming import sse_event
 from app.tracing import get_tracer
 
 tracer = get_tracer("ai-job-agent.agent")
@@ -100,51 +101,66 @@ def sse_to_event(raw_event: str) -> tuple[str, object]:
 
 def trace_stream(store, question, trace_id, stream):
     store.start_trace(question, trace_id)
+    span = None
+    finished = False
 
-    with tracer.start_as_current_span("agent.trace") as span:
-        span.set_attribute("agent.trace_id", trace_id)
-        span.set_attribute("agent.question", mask_value(question))
+    try:
+        with tracer.start_as_current_span("agent.trace") as span:
+            span.set_attribute("agent.trace_id", trace_id)
+            span.set_attribute("agent.question", mask_value(question))
 
-        yield f"event: trace\ndata: {trace_id}\n\n"
+            yield f"event: trace\ndata: {trace_id}\n\n"
 
-        for raw_event in stream:
-            event_name, data = sse_to_event(raw_event)
+            for raw_event in stream:
+                event_name, data = sse_to_event(raw_event)
 
-            masked_data = mask_value(data)
-            span.add_event(
-                event_name,
-                attributes={
-                    "data": json.dumps(
-                        masked_data,
-                        ensure_ascii=False,
+                masked_data = mask_value(data)
+                span.add_event(
+                    event_name,
+                    attributes={
+                        "data": json.dumps(
+                            masked_data,
+                            ensure_ascii=False,
+                        )
+                    },
+                )
+
+                if event_name == "step":
+                    store.record(
+                        trace_id,
+                        "step",
+                        tool=data.get("tool"),
+                        input=data.get("input"),
+                        observation=data.get("observation"),
                     )
-                },
-            )
+                elif event_name == "approval":
+                    store.record(
+                        trace_id,
+                        "approval",
+                        tool=data.get("tool"),
+                        arguments=data.get("arguments"),
+                    )
+                elif event_name == "answer":
+                    store.record(trace_id, "answer", answer=data)
+                elif event_name == "error":
+                    store.record(trace_id, "error", message=data)
+                    span.set_status(trace.Status(trace.StatusCode.ERROR))
+                elif event_name == "done":
+                    store.record(trace_id, "done")
+                    finished = True
 
-            if event_name == "step":
-                store.record(
-                    trace_id,
-                    "step",
-                    tool=data.get("tool"),
-                    input=data.get("input"),
-                    observation=data.get("observation"),
-                )
-            elif event_name == "approval":
-                store.record(
-                    trace_id,
-                    "approval",
-                    tool=data.get("tool"),
-                    arguments=data.get("arguments"),
-                )
-            elif event_name == "answer":
-                store.record(trace_id, "answer", answer=data)
-            elif event_name == "error":
-                store.record(trace_id, "error", message=data)
-                span.set_status(trace.Status(trace.StatusCode.ERROR))
-            elif event_name == "done":
-                store.record(trace_id, "done")
+                yield raw_event
 
-            yield raw_event
+            if not finished:
+                yield sse_event("done", "")
+    except Exception as exc:
+        store.record(trace_id, "error", message=str(exc))
+
+        if span is not None:
+            span.set_status(trace.Status(trace.StatusCode.ERROR))
+
+        yield sse_event("error", f"Agent 执行失败：{exc}")
+        yield sse_event("done", "")
 
 
 observability_store = ObservabilityStore()

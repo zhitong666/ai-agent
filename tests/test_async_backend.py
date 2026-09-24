@@ -5,7 +5,28 @@ import httpx
 from openai import APITimeoutError
 
 from app import async_llm
+from app.auth_security import create_access_token
 from app.main import app
+from app.quota import QuotaDecision
+
+
+def auth_headers():
+    token = create_access_token(
+        "test-user",
+        ["user"],
+        "default",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def seed_quota_service():
+    app.state.quota_service = MagicMock()
+    app.state.quota_service.check_request = AsyncMock(
+        return_value=QuotaDecision(allowed=True)
+    )
+    app.state.quota_service.consume_tokens = AsyncMock(
+        return_value=QuotaDecision(allowed=True)
+    )
 
 
 def make_completion(content):
@@ -48,6 +69,7 @@ def test_async_chat_endpoint_returns_patched_response():
             client,
             session_id,
             question,
+            scene="job",
             retriever=None,
             semaphore=None,
             session_store=None,
@@ -59,6 +81,7 @@ def test_async_chat_endpoint_returns_patched_response():
         app.state.session_store = MagicMock()
         app.state.rate_limiter = MagicMock()
         app.state.rate_limiter.allow = AsyncMock(return_value=True)
+        seed_quota_service()
 
         transport = httpx.ASGITransport(app=app)
 
@@ -73,6 +96,7 @@ def test_async_chat_endpoint_returns_patched_response():
                 response = await client.post(
                     "/chat",
                     json={"session_id": "s1", "question": "hello"},
+                    headers=auth_headers(),
                 )
 
         assert response.status_code == 200
@@ -93,6 +117,7 @@ def test_async_chat_requests_overlap():
             client,
             session_id,
             question,
+            scene="job",
             retriever=None,
             semaphore=None,
             session_store=None,
@@ -117,6 +142,7 @@ def test_async_chat_requests_overlap():
         app.state.session_store = MagicMock()
         app.state.rate_limiter = MagicMock()
         app.state.rate_limiter.allow = AsyncMock(return_value=True)
+        seed_quota_service()
 
         transport = httpx.ASGITransport(app=app)
 
@@ -130,6 +156,7 @@ def test_async_chat_requests_overlap():
                         client.post(
                             "/chat",
                             json={"session_id": f"s{i}", "question": "q"},
+                            headers=auth_headers(),
                         )
                     )
                     for i in range(3)
@@ -151,6 +178,7 @@ def test_async_chat_stream_endpoint_consumes_async_generator():
             client,
             session_id,
             question,
+            scene="job",
             retriever=None,
             semaphore=None,
             session_store=None,
@@ -163,6 +191,7 @@ def test_async_chat_stream_endpoint_consumes_async_generator():
         app.state.session_store = MagicMock()
         app.state.rate_limiter = MagicMock()
         app.state.rate_limiter.allow = AsyncMock(return_value=True)
+        seed_quota_service()
         
         transport = httpx.ASGITransport(app=app)
 
@@ -177,6 +206,7 @@ def test_async_chat_stream_endpoint_consumes_async_generator():
                 response = await client.post(
                     "/chat/stream",
                     json={"session_id": "s1", "question": "hello"},
+                    headers=auth_headers(),
                 )
 
         assert response.status_code == 200

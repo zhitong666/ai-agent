@@ -1,7 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field
@@ -15,8 +15,10 @@ from app.async_agent import (
     stream_answer_question_async,
 )
 from app.async_llm import create_async_client, create_llm_semaphore
-from app.auth_dependencies import require_roles
+from app.auth_dependencies import get_current_user, require_roles
 from app.auth_router import router as auth_router
+from app.context import count_tokens
+from app.demo_user import ensure_demo_user
 from app.http_observability import (
     ObservabilityMiddleware,
 )
@@ -36,6 +38,7 @@ from app.plan_execute import stream_plan_execute
 from app.postgres import create_postgres_pool
 from app.postgres_session_store import PostgresSessionStore
 from app.queue import create_queue
+from app.quota import QuotaService
 from app.react import stream_react_loop
 from app.redis_client import create_redis_client
 from app.redis_rate_limiter import RedisRateLimiter
@@ -58,6 +61,48 @@ def get_memory_store():
     return SharedMemoryStore(MEMORY_DB_PATH)
 
 
+def get_quota_service(request: Request):
+    return request.app.state.quota_service
+
+
+async def enforce_quota(
+    quota_service,
+    user,
+    question: str,
+    scene: str,
+    *,
+    agent: bool = False,
+) -> None:
+    decision = await quota_service.check_request(user.sub, user.roles)
+
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="今日问题额度已用完，请登录后继续使用。",
+        )
+
+    if scene == "general":
+        estimated_tokens = count_tokens(question) + 1200
+    elif scene in {"interview", "resume"}:
+        estimated_tokens = count_tokens(question) + 1800
+    elif agent:
+        estimated_tokens = count_tokens(question) + 3500
+    else:
+        estimated_tokens = count_tokens(question) + 2200
+
+    decision = await quota_service.consume_tokens(
+        user.sub,
+        user.roles,
+        estimated_tokens,
+    )
+
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="今日 Token 额度已用完，请登录后继续使用。",
+        )
+
+
 @asynccontextmanager
 async def lifespan(app):
     app.state.async_client = create_async_client()
@@ -68,6 +113,8 @@ async def lifespan(app):
     app.state.rate_limiter = RedisRateLimiter(app.state.redis)
     app.state.job_store = JobStore(app.state.redis)
     app.state.user_repository = UserRepository(app.state.postgres_pool)
+    app.state.quota_service = QuotaService(app.state.redis)
+    await ensure_demo_user(app.state.user_repository)
 
     postgres_session_store = PostgresSessionStore(app.state.postgres_pool)
     app.state.session_store = RedisSessionCache(
@@ -149,9 +196,20 @@ async def health_queue() -> dict[str, str]:
 
 
 @app.post("/jd/parse", response_model=JobDescription)
-async def parse_jd(request: ParseRequest) -> JobDescription:
+async def parse_jd(
+    request: ParseRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+) -> JobDescription:
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
+
+    await enforce_quota(
+        quota_service,
+        user,
+        request.text,
+        "job",
+    )
 
     return await parse_job_description_async(
         app.state.async_client,
@@ -165,9 +223,21 @@ class AnalyzeRequest(BaseModel):
 
 
 @app.post("/jd/analyze", response_model=JobAnalysis)
-async def analyze_jd(request: AnalyzeRequest) -> JobAnalysis:
+async def analyze_jd(
+    request: AnalyzeRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+) -> JobAnalysis:
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
+
+    await enforce_quota(
+        quota_service,
+        user,
+        request.text,
+        "job",
+        agent=True,
+    )
 
     return await analyze_job_async(
         app.state.async_client,
@@ -179,10 +249,15 @@ async def analyze_jd(request: AnalyzeRequest) -> JobAnalysis:
 class ChatRequest(BaseModel):
     session_id: str
     question: str = Field(min_length=1)
+    scene: str = "job"
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+) -> ChatResponse:
     rate_key = f"chat:rate:{request.session_id}"
     allowed = await app.state.rate_limiter.allow(
         rate_key,
@@ -193,17 +268,29 @@ async def chat(request: ChatRequest) -> ChatResponse:
     if not allowed:
         raise HTTPException(status_code=429, detail="too many requests")
 
+    await enforce_quota(
+        quota_service,
+        user,
+        request.question,
+        request.scene,
+    )
+
     return await answer_question_async(
         app.state.async_client,
         request.session_id,
         request.question,
+        scene=request.scene,
         semaphore=app.state.llm_semaphore,
         session_store=app.state.session_store,
     )
 
 
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
 
@@ -217,11 +304,19 @@ async def chat_stream(request: ChatRequest):
     if not allowed:
         raise HTTPException(status_code=429, detail="too many requests")
 
+    await enforce_quota(
+        quota_service,
+        user,
+        request.question,
+        request.scene,
+    )
+
     return StreamingResponse(
         stream_answer_question_async(
             app.state.async_client,
             request.session_id,
             request.question,
+            scene=request.scene,
             semaphore=app.state.llm_semaphore,
             session_store=app.state.session_store,
         ),
@@ -309,6 +404,7 @@ async def get_job_status(
 class AgentStreamRequest(BaseModel):
     question: str = Field(min_length=1)
     request_id: str | None = None
+    scene: str = "job"
 
 
 class ApprovalRequest(BaseModel):
@@ -317,9 +413,21 @@ class ApprovalRequest(BaseModel):
 
 
 @app.post("/agent/stream")
-def agent_stream(request: AgentStreamRequest):
+async def agent_stream(
+    request: AgentStreamRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+
+    await enforce_quota(
+        quota_service,
+        user,
+        request.question,
+        request.scene,
+        agent=True,
+    )
 
     request_id = request.request_id or str(uuid.uuid4())
 
@@ -344,7 +452,10 @@ def agent_stream(request: AgentStreamRequest):
 
 
 @app.post("/agent/approve")
-def agent_approve(request: ApprovalRequest):
+def agent_approve(
+    request: ApprovalRequest,
+    user=Depends(get_current_user),
+):
     approval_store.decide(request.request_id, request.approved)
     return {"status": "ok"}
 
@@ -360,7 +471,22 @@ def get_agent_trace(trace_id: str):
 
 
 @app.post("/agent/plan/stream")
-def agent_plan_stream(request: AgentStreamRequest):
+async def agent_plan_stream(
+    request: AgentStreamRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+):
+    if not request.question.strip():
+        raise HTTPException(status_code=422, detail="question must not be empty")
+
+    await enforce_quota(
+        quota_service,
+        user,
+        request.question,
+        request.scene,
+        agent=True,
+    )
+
     request_id = request.request_id or str(uuid.uuid4())
     registry = build_default_registry()
     retriever = get_retriever()
@@ -379,9 +505,21 @@ def agent_plan_stream(request: AgentStreamRequest):
 
 
 @app.post("/agent/supervisor/stream")
-def agent_supervisor_stream(request: AgentStreamRequest):
+async def agent_supervisor_stream(
+    request: AgentStreamRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+
+    await enforce_quota(
+        quota_service,
+        user,
+        request.question,
+        request.scene,
+        agent=True,
+    )
 
     request_id = request.request_id or str(uuid.uuid4())
 
@@ -397,9 +535,21 @@ def agent_supervisor_stream(request: AgentStreamRequest):
 
 
 @app.post("/agent/graph/stream")
-def agent_graph_stream(request: AgentStreamRequest):
+async def agent_graph_stream(
+    request: AgentStreamRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+
+    await enforce_quota(
+        quota_service,
+        user,
+        request.question,
+        request.scene,
+        agent=True,
+    )
 
     request_id = request.request_id or str(uuid.uuid4())
 
@@ -423,12 +573,24 @@ class GraphRunRequest(BaseModel):
 
 
 @app.post("/agent/graph/start", response_model=GraphRunStatus)
-def agent_graph_start(request: GraphRunRequest):
+async def agent_graph_start(
+    request: GraphRunRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+):
+    await enforce_quota(
+        quota_service,
+        user,
+        request.question,
+        "job",
+        agent=True,
+    )
+
     return start_graph_run(
         request.question,
         run_id=request.run_id,
         request_id=request.request_id,
-        tenant_id=request.tenant_id,
+        tenant_id=user.tenant_id,
         timeout_seconds=request.timeout_seconds,
         interrupt_before=["finalize"],
     )
@@ -441,10 +603,13 @@ class GraphResumeRequest(BaseModel):
 
 
 @app.post("/agent/graph/resume", response_model=GraphRunStatus)
-def agent_graph_resume(request: GraphResumeRequest):
+def agent_graph_resume(
+    request: GraphResumeRequest,
+    user=Depends(get_current_user),
+):
     return resume_graph_run(
         request.run_id,
-        tenant_id=request.tenant_id,
+        tenant_id=user.tenant_id,
         timeout_seconds=request.timeout_seconds,
     )
 
@@ -452,17 +617,17 @@ def agent_graph_resume(request: GraphResumeRequest):
 @app.get("/agent/graph/state/{run_id}", response_model=GraphRunStatus)
 def agent_graph_state(
     run_id: str,
-    tenant_id: str = "default",
+    user=Depends(get_current_user),
 ):
-    return get_graph_run(run_id, tenant_id=tenant_id)
+    return get_graph_run(run_id, tenant_id=user.tenant_id)
 
 
 @app.get("/agent/memory/{run_id}", response_model=list[MemoryRecord])
 def agent_memory_list(
     run_id: str,
-    tenant_id: str = "default",
+    user=Depends(get_current_user),
 ):
-    namespace = f"tenant:{tenant_id}:run:{run_id}"
+    namespace = f"tenant:{user.tenant_id}:run:{run_id}"
     return get_memory_store().list_namespace(namespace)
 
 
@@ -470,9 +635,9 @@ def agent_memory_list(
 def agent_memory_get(
     run_id: str,
     key: str,
-    tenant_id: str = "default",
+    user=Depends(get_current_user),
 ):
-    namespace = f"tenant:{tenant_id}:run:{run_id}"
+    namespace = f"tenant:{user.tenant_id}:run:{run_id}"
     record = get_memory_store().get(namespace, key)
 
     if record is None:
@@ -485,9 +650,9 @@ def agent_memory_get(
 def agent_memory_delete(
     run_id: str,
     key: str,
-    tenant_id: str = "default",
+    user=Depends(get_current_user),
 ):
-    namespace = f"tenant:{tenant_id}:run:{run_id}"
+    namespace = f"tenant:{user.tenant_id}:run:{run_id}"
     deleted = get_memory_store().delete(namespace, key)
 
     if not deleted:
@@ -497,9 +662,21 @@ def agent_memory_delete(
 
 
 @app.post("/agent/mcp/stream")
-def agent_mcp_stream(request: AgentStreamRequest):
+async def agent_mcp_stream(
+    request: AgentStreamRequest,
+    user=Depends(get_current_user),
+    quota_service=Depends(get_quota_service),
+):
     if not request.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty")
+
+    await enforce_quota(
+        quota_service,
+        user,
+        request.question,
+        request.scene,
+        agent=True,
+    )
 
     request_id = request.request_id or str(uuid.uuid4())
 

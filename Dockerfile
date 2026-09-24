@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 FROM python:3.12.9-slim AS builder
 
 ARG UV_VERSION=0.12.5

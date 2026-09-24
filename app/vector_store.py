@@ -34,14 +34,23 @@ class VectorStoreError(ValueError):
 
 
 class VectorStore(Protocol):
+    """向量库统一接口。
+
+    这里是 Protocol，不是可以实例化的基类。它只定义 Chroma、Qdrant 等
+    具体向量库必须提供的形状，具体实现由 ChromaStore 和 QdrantStore 完成。
+    """
+
     def upsert(self, chunks: list[dict], embeddings: np.ndarray) -> None:
-        ...
-    
+        """写入或覆盖 chunk 对应的向量和元数据。"""
+        raise NotImplementedError
+
     def load_embeddings(self, chunk_ids: list[str]) -> np.ndarray:
-        ...
+        """按 chunk_ids 的传入顺序返回向量。"""
+        raise NotImplementedError
 
     def has_chunks(self, chunk_ids: list[str]) -> bool:
-        ...
+        """判断所有 chunk_id 是否已经存在于向量库。"""
+        raise NotImplementedError
 
     def query(
         self,
@@ -49,7 +58,8 @@ class VectorStore(Protocol):
         top_k: int,
         where: dict | None = None,
     ) -> Any:
-        ...
+        """按向量相似度查询，并支持元数据过滤。"""
+        raise NotImplementedError
 
 
 def _to_chroma_metadata(chunk: dict) -> dict:

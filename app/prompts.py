@@ -44,6 +44,25 @@ CHAT_INSTRUCTIONS = """你是 AI 岗位咨询助手。
 如果使用了知识库内容，请在相关句子末尾用 [chunk_id] 标注来源。
 如果知识库没有相关内容，就明确说明不知道。"""
 
+PROJECT_CHAT_INSTRUCTIONS = """你是本项目技术知识库助手。
+根据知识库内容回答用户问题，回答要准确、简洁，并尽量使用 Markdown。
+如果使用了知识库内容，请在相关句子末尾用 [chunk_id] 标注来源。
+如果知识库没有相关内容，就明确说明知识库中没有，不要编造。"""
+
+GENERAL_CHAT_INSTRUCTIONS = """你是一个通用 AI 助手，主要服务面试和技术学习场景。
+你可以回答 Python、FastAPI、RAG、AI Agent、React、Docker、系统设计、数据库、缓存、部署和常见算法问题。
+回答要结构清晰，尽量使用 Markdown，涉及代码时使用代码块。
+如果问题超出知识范围，请直接说明不确定，不要编造。"""
+
+INTERVIEW_INSTRUCTIONS = """你是一名经验丰富的技术面试官。
+根据用户的目标岗位或当前主题进行模拟面试，一次只问一个主要问题。
+如果用户回答得太简单，继续追问关键点；如果用户回答完整，给出简短评价后再进入下一个问题。
+保持语气专业、克制，不要一次性输出整套面试题。"""
+
+RESUME_INSTRUCTIONS = """你是一名求职简历和面试顾问。
+用户可以粘贴简历、岗位 JD 或面试经历，你帮助提炼亮点、发现问题并给出可执行建议。
+输出使用 Markdown，优先给出结论，再列行动项。"""
+
 
 def _format_few_shot_examples(examples: list[dict]) -> str:
     blocks = []
@@ -147,20 +166,41 @@ def build_chat_messages(
     history: list[dict],
     context: str,
     question: str,
+    scene: str = "job",
 ) -> list[dict]:
+    if scene == "general":
+        system_content = GENERAL_CHAT_INSTRUCTIONS
+        user_content = question
+    elif scene == "interview":
+        system_content = INTERVIEW_INSTRUCTIONS
+        user_content = question
+    elif scene == "resume":
+        system_content = RESUME_INSTRUCTIONS
+        user_content = question
+    elif scene == "project":
+        system_content = PROJECT_CHAT_INSTRUCTIONS
+        user_content = PROMPT_LIBRARY.render(
+            "chat_user",
+            context=context,
+            question=question,
+        )
+    else:
+        system_content = PROMPT_LIBRARY.render("chat_system")
+        user_content = PROMPT_LIBRARY.render(
+            "chat_user",
+            context=context,
+            question=question,
+        )
+
     return [
         {
             "role": "system",
-            "content": PROMPT_LIBRARY.render("chat_system"),
+            "content": system_content,
         },
         *history,
         {
             "role": "user",
-            "content": PROMPT_LIBRARY.render(
-                "chat_user",
-                context=context,
-                question=question,
-            ),
+            "content": user_content,
         },
     ]
 
